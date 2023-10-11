@@ -7,6 +7,7 @@ import redis
 from django.db.models import F
 from django.db import transaction
 from django.conf import settings
+from django.core.mail import send_mail
 
 from cvat.apps.engine.models import Project, Task, LabeledShape, Label, AttributeSpec, Job, \
     S3File, Data, StorageMethodChoice, SortingMethod, RemoteFile, ModeChoice, LabeledShapeAttributeVal
@@ -37,7 +38,6 @@ import requests
 from urllib import parse as urlparse, request as urlrequest
 
 from cvat.apps.engine import models
-from cvat.apps.engine.log import slogger
 from cvat.apps.engine.media_extractors import MEDIA_TYPES
 from cvat.apps.engine.utils import av_scan_paths
 
@@ -55,7 +55,7 @@ def _save_task_to_db(db_task, extractor):
     for start_frame in range(0, db_task.data.size, segment_step):
         stop_frame = min(start_frame + segment_size - 1, db_task.data.size - 1)
 
-        slogger.glob.info("New segment for task #{}: start_frame = {}, \
+        logger.info("New segment for task #{}: start_frame = {}, \
             stop_frame = {}".format(db_task.id, start_frame, stop_frame))
 
         db_segment = models.Segment()
@@ -487,7 +487,7 @@ def _create_task(project: Project, data, job_size, task_size, i):
         LabeledShapeAttributeVal.objects.bulk_create(flat_attributes, batch_size=200)
 
 
-def start(source_id, target_id, labels, job_size=50, n_jobs=10):
+def start(source_id, target_id, labels, job_size=50, n_jobs=10, mail_to=None):
     meta_key = f'move_{source_id}_{target_id}_meta'
     data_key = f'move_{source_id}_{target_id}_data'
 
@@ -528,6 +528,24 @@ def start(source_id, target_id, labels, job_size=50, n_jobs=10):
 
         cache.delete(meta_key)
         cache.delete(data_key)
+
+        if mail_to is not None:
+            send_mail(
+                f'Images transfer complete',
+                f'Images were transferred successfully from {source_id} to {target_id}.',
+                settings.DEFAULT_FROM_EMAIL,
+                mail_to,
+            )
+    except Exception as e:
+        if mail_to is not None:
+            send_mail(
+                f'Images transfer failed',
+                f'Images transfer from {source_id} to {target_id} failed with error: {e}.'
+                f' You may restart it from cache by running the copying script again.',
+                settings.DEFAULT_FROM_EMAIL,
+                mail_to,
+            )
+        raise
     finally:
         cache.close()
 
@@ -539,4 +557,4 @@ start(12, 1, {
     'text_area': 'Text OCR',
     'Shelf': 'Shelf line',
     'Shelf edge': 'Shelf line'
-}, job_size=3, n_jobs=2)
+}, job_size=3, n_jobs=2, mail_to=['mail@example.com'])
