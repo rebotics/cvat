@@ -19,9 +19,7 @@ from cvat.apps.engine.log import slogger
 
 logger = slogger.glob
 
-#####################
 # Engine task start #
-#####################
 
 # So the problem here is, that engine task processor
 # assumes that it runs in a python-rq job
@@ -280,17 +278,25 @@ def _prepare(source_id, target_id, labels, job_size=50, n_jobs=10):
         raise ValueError('Target project does not exist')
 
     # create labels if needed
+    all_source_labels = {
+        label.name: label
+        for label in source_project.label_set.all()
+    }
+    print(list(all_source_labels.keys()))
+
     source_labels = {
         label.name: label for label in
         source_project.label_set.filter(name__in=labels).prefetch_related('attributespec_set')
     }
+
     do_not_exist = []
     for key in labels:
         if key not in source_labels:
             do_not_exist.append(key)
 
     if len(do_not_exist) > 0:
-        raise ValueError(f'Source project does not have the labels: {do_not_exist}')
+        raise ValueError(f'Source project does not have the labels: {do_not_exist},'
+                         f' while source project has: {list(source_labels.keys())}')
 
     target_labels = {
         label.name: label for label in
@@ -550,11 +556,38 @@ def start(source_id, target_id, labels, job_size=50, n_jobs=10, mail_to=None):
         cache.close()
 
 
-start(12, 1, {
-    'Price tag': 'Price tag',
-    'Box container': 'Product',
-    'Product item': 'Product',
-    'text_area': 'Text OCR',
-    'Shelf': 'Shelf line',
-    'Shelf edge': 'Shelf line'
-}, job_size=3, n_jobs=2, mail_to=['mail@example.com'])
+# destination keys
+# product, price_tag pegboard shelf_line edge_line virtual_line
+
+
+def r3dev_to_flat_project():
+    start(67, 1005, {
+        'price_tag': 'price_tag',
+        # 'Price tag': 'price_tag',
+        # 'Box container': 'product',
+        'Product item': 'product',
+        'All UPC': 'product',
+        'ShelfLine': 'shelf_line',
+        'Pegboard': 'pegboard',
+        'Shelf edge': 'edge_line',
+    }, job_size=50, n_jobs=10, mail_to=['malik@retechlabs.com', 'rauf@retechlabs.com', 'farid@retechlabs.com'])
+
+
+def r3us_to_flat_project():
+    start(26, 27, {
+        'All PRICE TAGS': 'price_tag',
+        'All UPC': 'product',
+        'Price tag': 'price_tag',
+        #'Location tag'
+        'Shelf line': 'shelf_line',
+        'Shelf edge': 'edge_line',
+
+        'Product item': 'product',
+        'Virtual line': 'virtual_line',
+        # 'Box container': 'product',
+        'Box container': 'box_container',
+        'Pegboard': 'pegboard',
+    }, job_size=50, n_jobs=10, mail_to=['malik@retechlabs.com', 'rauf@retechlabs.com', 'farid@retechlabs.com'])
+
+
+r3us_to_flat_project()
