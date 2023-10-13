@@ -7,7 +7,6 @@ import redis
 from django.db.models import F
 from django.db import transaction
 from django.conf import settings
-from django.core.mail import send_mail
 
 from cvat.apps.engine.models import Project, Task, LabeledShape, Label, AttributeSpec, Job, \
     S3File, Data, StorageMethodChoice, SortingMethod, RemoteFile, ModeChoice, LabeledShapeAttributeVal
@@ -247,9 +246,7 @@ def _create_noatomic(db_task, data, rename_files=True):
     _save_task_to_db(db_task, extractor)
     _move_data_to_s3(db_task, db_data)
 
-#####################
 #  Engine task end  #
-#####################
 
 
 def _rand_color():
@@ -260,30 +257,7 @@ def _rand_color():
     return color
 
 
-def _prepare(source_id, target_id, labels, job_size=50, n_jobs=10):
-    # validate arguments
-    if n_jobs < 1:
-        raise ValueError('Task should have at least 1 job')
-    if job_size < 1:
-        raise ValueError('Job size should be positive integer')
-
-    try:
-        source_project = Project.objects.get(pk=source_id)
-    except Project.DoesNotExist:
-        raise ValueError('Source project does not exist')
-
-    try:
-        target_project = Project.objects.get(pk=target_id)
-    except Project.DoesNotExist:
-        raise ValueError('Target project does not exist')
-
-    # create labels if needed
-    all_source_labels = {
-        label.name: label
-        for label in source_project.label_set.all()
-    }
-    print(list(all_source_labels.keys()))
-
+def _prepare_labels(source_project: Project, target_project: Project, labels):
     source_labels = {
         label.name: label for label in
         source_project.label_set.filter(name__in=labels).prefetch_related('attributespec_set')
@@ -342,65 +316,39 @@ def _prepare(source_id, target_id, labels, job_size=50, n_jobs=10):
             'specs': specs_map,
         }
 
-    # this has label, frame and relation to task through job and segment
-    shapes = LabeledShape.objects\
-        .filter(label_id__in=labels_map)\
-        .annotate(task_id=F('job__segment__task_id'))\
-        .order_by('task_id', 'frame')\
+    return labels_map
+
+
+def _get_files(task, labels, frame=0):
+    files = sort(
+        S3File.objects.filter(data_id=task['data_id']),
+        sorting_method=task['sorting'],
+        func=lambda f: f.file.name,
+    )
+
+    shapes = LabeledShape.objects \
+        .annotate(task_id=F('job__segment__task_id')) \
+        .filter(label_id__in=labels, task_id=task['pk'], frame__gte=frame) \
+        .order_by('frame') \
         .prefetch_related('labeledshapeattributeval_set')
-    serialized_shapes = {}
-    for shape in shapes:
-        serialized_shape = {
-            'label_id': labels_map[shape.label_id]['pk'],
-            'group': shape.group,
-            'source': shape.source,
-            'type': shape.type,
-            'occluded': shape.occluded,
-            'outside': shape.outside,
-            'z_order': shape.z_order,
-            'points': shape.points,
-            'rotation': shape.rotation,
-            'attributes': [{
-                'spec_id': labels_map[shape.label_id]['specs'][attr.spec_id],
-                'value': attr.value,
-            } for attr in shape.labeledshapeattributeval_set.all()]
-        }
-        if shape.task_id in serialized_shapes:
-            if shape.frame in serialized_shapes[shape.task_id]:
-                serialized_shapes[shape.task_id][shape.frame].append(serialized_shape)
-            else:
-                serialized_shapes[shape.task_id][shape.frame] = [serialized_shape]
-        else:
-            serialized_shapes[shape.task_id] = {shape.frame: [serialized_shape]}
 
-    # each task may have its own sorting for files, so frames will be different
-    tasks = source_project.tasks.order_by('pk').select_related('data')
+    result = []
+    last = 0
+    for i in range(1, len(shapes)):
+        if shapes[i].frame != shapes[last].frame:
+            result.append((
+                files[shapes[last].frame],
+                shapes[last:i],
+            ))
+            last = i
+    result.append(shapes[last:])
 
-    min_quality = tasks[0].data.image_quality
-    s3_files = []
-    for task in tasks:
-        if task.pk in serialized_shapes:
-            task_files = sort(
-                task.data.s3_files.all(),
-                sorting_method=task.data.sorting_method,
-                func=lambda f: f.file.name,
-            )
-            s3_files += [{
-                'pk': task_files[frame].pk,
-                'shapes': serialized_shapes[task.pk][frame]
-            } for frame in serialized_shapes[task.pk]]
-
-        if task.data.image_quality < min_quality:
-            min_quality = task.data.image_quality
-
-    return s3_files
+    return result
 
 
 @transaction.atomic
-def _create_task(project: Project, data, job_size, task_size, i):
+def _create_task(project: Project, data, labels, job_size, task_size, i):
     size = min(len(data), task_size)
-    data = {item['pk']: item['shapes'] for item in data}
-    from_files = S3File.objects.filter(pk__in=data.keys())
 
     logger.info('Creating task')
     db_data = Data.objects.create(
@@ -424,14 +372,17 @@ def _create_task(project: Project, data, job_size, task_size, i):
         segment_size=job_size,
     )
 
-    files = RemoteFile.objects.bulk_create([
-        RemoteFile(
+    shapes_map = {}
+    files = []
+    for file, shapes in data:
+        files.append(RemoteFile(
             data=db_data,
             file=file.file.url,
             meta={'from_pk': file.pk}
-        )
-        for file in from_files
-    ], batch_size=100)
+        ))
+        shapes_map[file.pk] = shapes
+
+    files = RemoteFile.objects.bulk_create(files, batch_size=100)
 
     logger.info('Processing task')
     try:
@@ -467,98 +418,120 @@ def _create_task(project: Project, data, job_size, task_size, i):
 
     jobs = Job.objects.filter(segment__task_id=task.pk).order_by('pk')
     for frame, file in enumerate(files):
-        shapes = []
+        shapes = {}
         attributes = []
-        for shape_data in data[file.meta['from_pk']]:
-            attributes_data = shape_data.pop('attributes')
-            attributes.append([
-                LabeledShapeAttributeVal(
-                    spec_id=item['spec_id'],
-                    shape_id=0,
-                    value=item['value']
-                ) for item in attributes_data
-            ])
-            shapes.append(LabeledShape(
+        for shape in shapes_map[file.meta['from_pk']]:
+            shapes[shape.pk] = LabeledShape(
+                label_id=labels[shape.label_id]['pk'],
                 job_id=jobs[frame // job_size].pk,
                 frame=frame,
-                **shape_data,
-            ))
+                group=shape.group,
+                source=shape.source,
+                type=shape.type,
+                occluded=shape.occluded,
+                outside=shape.outside,
+                z_order=shape.z_order,
+                points=shape.points,
+                rotation=shape.rotation,
+            )
 
-        shapes = LabeledShape.objects.bulk_create(shapes, batch_size=200)
-        flat_attributes = []
-        for i, shape in enumerate(shapes):
-            for attribute in attributes[i]:
-                attribute.shape_id = shape.pk
-                flat_attributes.append(attribute)
-        LabeledShapeAttributeVal.objects.bulk_create(flat_attributes, batch_size=200)
+            attributes += [LabeledShapeAttributeVal(
+                spec_id=labels[shape.label_id]['specs'][attribute.spec_id],
+                shape_id=attribute.shape_id,
+                value=attribute.value,
+            ) for attribute in shape.labeledshapeattributeval_set.all()]
+
+        LabeledShape.objects.bulk_create(shapes, batch_size=100)
+        for attribute in attributes:
+            attribute.shape_id = shapes[attribute.shape_id].pk
+
+        LabeledShapeAttributeVal.objects.bulk_create(attributes, batch_size=100)
 
 
-def start(source_id, target_id, labels, job_size=50, n_jobs=10, mail_to=None):
-    meta_key = f'move_{source_id}_{target_id}_meta'
-    data_key = f'move_{source_id}_{target_id}_data'
+def start(source_id, target_id, labels, job_size=50, n_jobs=10):
+    """
+    source_id - source project id
+    target_id - target project id, must already exist
+    labels - labels' name mapping
+    job_size - number of images per target job
+    n_jobs - number of jobs per target task
+    batch_size - how much images to process at once.
+    """
+
+    if n_jobs < 1:
+        raise ValueError('Task should have at least 1 job')
+    if job_size < 1:
+        raise ValueError('Job size should be positive integer')
+
+    try:
+        source_project = Project.objects.get(pk=source_id)
+    except Project.DoesNotExist:
+        raise ValueError('Source project does not exist')
+
+    try:
+        target_project = Project.objects.get(pk=target_id)
+    except Project.DoesNotExist:
+        raise ValueError('Target project does not exist')
 
     cache = redis.Redis.from_url(settings.REDIS_URL)
-    try:
-        meta = cache.get(meta_key)
-        if meta is None:
-            logger.info('Starting new import')
-            data = _prepare(source_id, target_id, labels)
-            meta = {
-                'current': 0,
-                'total': len(data),
-                'job_size': job_size,
-                'n_jobs': n_jobs,
-            }
-            cache.set(meta_key, json.dumps(meta))
-            cache.set(data_key, json.dumps(data))
-        else:
-            logger.info(f'Continue previous import')
-            meta = json.loads(meta)
-            data = json.loads(cache.get(data_key))
+    cache_key = f'copy_prj_{source_id}_{target_id}'
+    progress = cache.get(cache_key)
+    if progress is None:
+        progress = {
+            'task_id': 0,
+            'frame': 0,
+            'task_n': 0,
+        }
+    else:
+        progress = json.loads(progress)
 
-        start_frame = meta['current']
-        total = meta['total']
-        job_size = meta['job_size']
-        task_size = job_size * meta['n_jobs']
-        project = Project.objects.get(pk=target_id)
+    labels = _prepare_labels(source_project, target_project, labels)
 
-        logger.info(f'{start_frame:06d} / {total:06d}')
-        i = 0
-        for frame in range(start_frame, total, task_size):
-            next_frame = min(frame + task_size, total)
-            _create_task(project, data[frame: next_frame], job_size, task_size, i)
-            meta['current'] = next_frame
-            cache.set(meta_key, json.dumps(meta))
-            i += 1
-            logger.info(f'{next_frame:06d} / {total:06d}')
+    target_tasks = target_project.tasks\
+        .filter(data__isnull=False, pk__gte=progress['task_id'])\
+        .annotate(size='data__size', sorting='data__sorting_method')\
+        .values('pk', 'data_id', 'size', 'sorting')
 
-        cache.delete(meta_key)
-        cache.delete(data_key)
+    size = 0
+    files = []
+    task_size = job_size * n_jobs
+    task_n = progress['task_n']
+    frame = progress['frame']
+    for task in target_tasks:
+        size += task['size']
+        files += _get_files(task, labels, frame)
+        frame = 0
+        if size >= task_size:
+            _create_task(target_project, files[:task_size], labels, job_size, task_size, task_n)
+            size -= task_size
+            files = files[task_size:]
+            task_n += 1
 
-        if mail_to is not None:
-            send_mail(
-                f'Images transfer complete',
-                f'Images were transferred successfully from {source_id} to {target_id}.',
-                settings.DEFAULT_FROM_EMAIL,
-                mail_to,
-            )
-    except Exception as e:
-        if mail_to is not None:
-            send_mail(
-                f'Images transfer failed',
-                f'Images transfer from {source_id} to {target_id} failed with error: {e}.'
-                f' You may restart it from cache by running the copying script again.',
-                settings.DEFAULT_FROM_EMAIL,
-                mail_to,
-            )
-        raise
-    finally:
-        cache.close()
+            cache.set(cache_key, {
+                'task_id': files[0][0].task_id,
+                'frame': files[0][0].frame,
+                'task_n': task_n
+            })
+
+    if size > 0:
+        _create_task(files)
+
+    cache.delete(cache_key)
+
+
+def test_local():
+    start(12, 1, {
+        'Price tag': 'Price tag',
+        'Box container': 'Product',
+        'Product item': 'Product',
+        'text_area': 'Text OCR',
+        'Shelf': 'Shelf line',
+        'Shelf edge': 'Shelf line'
+    }, job_size=3, n_jobs=2)
 
 
 # destination keys
 # product, price_tag pegboard shelf_line edge_line virtual_line
-
 
 def r3dev_to_flat_project():
     start(67, 1005, {
@@ -570,7 +543,7 @@ def r3dev_to_flat_project():
         'ShelfLine': 'shelf_line',
         'Pegboard': 'pegboard',
         'Shelf edge': 'edge_line',
-    }, job_size=50, n_jobs=10, mail_to=['malik@retechlabs.com', 'rauf@retechlabs.com', 'farid@retechlabs.com'])
+    }, job_size=50, n_jobs=10)
 
 
 def r3us_to_flat_project():
@@ -587,7 +560,7 @@ def r3us_to_flat_project():
         # 'Box container': 'product',
         'Box container': 'box_container',
         'Pegboard': 'pegboard',
-    }, job_size=50, n_jobs=10, mail_to=['malik@retechlabs.com', 'rauf@retechlabs.com', 'farid@retechlabs.com'])
+    }, job_size=50, n_jobs=10)
 
 
-r3us_to_flat_project()
+test_local()
