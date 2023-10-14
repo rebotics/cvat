@@ -332,16 +332,22 @@ def _get_files(task, labels, frame=0):
         .order_by('frame') \
         .prefetch_related('labeledshapeattributeval_set')
 
+    n = len(shapes)
     result = []
     last = 0
-    for i in range(1, len(shapes)):
+    for i in range(1, n):
         if shapes[i].frame != shapes[last].frame:
             result.append((
                 files[shapes[last].frame],
                 shapes[last:i],
             ))
             last = i
-    result.append(shapes[last:])
+
+    if last < n:
+        result.append((
+            files[shapes[last].frame],
+            shapes[last:]
+        ))
 
     return result
 
@@ -441,11 +447,12 @@ def _create_task(project: Project, data, labels, job_size, task_size, i):
                 value=attribute.value,
             ) for attribute in shape.labeledshapeattributeval_set.all()]
 
-        LabeledShape.objects.bulk_create(shapes, batch_size=100)
+        LabeledShape.objects.bulk_create(shapes.values(), batch_size=100)
         for attribute in attributes:
             attribute.shape_id = shapes[attribute.shape_id].pk
 
         LabeledShapeAttributeVal.objects.bulk_create(attributes, batch_size=100)
+    logger.info('Done!')
 
 
 def start(source_id, target_id, labels, job_size=50, n_jobs=10):
@@ -485,36 +492,37 @@ def start(source_id, target_id, labels, job_size=50, n_jobs=10):
     else:
         progress = json.loads(progress)
 
+    logger.info(f'Cached progress: {progress}')
+
     labels = _prepare_labels(source_project, target_project, labels)
 
-    target_tasks = target_project.tasks\
+    source_tasks = source_project.tasks\
         .filter(data__isnull=False, pk__gte=progress['task_id'])\
-        .annotate(size='data__size', sorting='data__sorting_method')\
+        .annotate(size=F('data__size'), sorting=F('data__sorting_method'))\
         .values('pk', 'data_id', 'size', 'sorting')
 
-    size = 0
     files = []
     task_size = job_size * n_jobs
     task_n = progress['task_n']
     frame = progress['frame']
-    for task in target_tasks:
-        size += task['size']
+    for task in source_tasks:
         files += _get_files(task, labels, frame)
         frame = 0
-        if size >= task_size:
+        if len(files) > task_size:
             _create_task(target_project, files[:task_size], labels, job_size, task_size, task_n)
-            size -= task_size
             files = files[task_size:]
             task_n += 1
 
-            cache.set(cache_key, {
-                'task_id': files[0][0].task_id,
-                'frame': files[0][0].frame,
+            progress = {
+                'task_id': files[0][1][0].task_id,
+                'frame': files[0][1][0].frame,
                 'task_n': task_n
-            })
+            }
+            cache.set(cache_key, json.dumps(progress))
+            logger.info(f'Progress update: {progress}')
 
-    if size > 0:
-        _create_task(files)
+    if len(files) > 0:
+        _create_task(target_project, files, labels, job_size, task_size, task_n)
 
     cache.delete(cache_key)
 
