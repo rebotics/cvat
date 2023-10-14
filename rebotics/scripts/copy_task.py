@@ -462,7 +462,6 @@ def start(source_id, target_id, labels, job_size=50, n_jobs=10):
     labels - labels' name mapping
     job_size - number of images per target job
     n_jobs - number of jobs per target task
-    batch_size - how much images to process at once.
     """
 
     if n_jobs < 1:
@@ -508,7 +507,7 @@ def start(source_id, target_id, labels, job_size=50, n_jobs=10):
     for task in source_tasks:
         files += _get_files(task, labels, frame)
         frame = 0
-        if len(files) > task_size:
+        while len(files) > task_size:
             _create_task(target_project, files[:task_size], labels, job_size, task_size, task_n)
             files = files[task_size:]
             task_n += 1
@@ -528,7 +527,7 @@ def start(source_id, target_id, labels, job_size=50, n_jobs=10):
 
 
 def test_local():
-    start(12, 1, {
+    start(12, 2, {
         'Price tag': 'Price tag',
         'Box container': 'Product',
         'Product item': 'Product',
@@ -569,6 +568,3 @@ def r3us_to_flat_project():
         'Box container': 'box_container',
         'Pegboard': 'pegboard',
     }, job_size=50, n_jobs=10)
-
-
-test_local()
