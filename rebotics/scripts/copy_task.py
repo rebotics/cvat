@@ -98,7 +98,7 @@ def _download_data(db_data: models.Data, upload_dir, rename_files=False):
         _validate_url(url)
         logger.info("Downloading: {}".format(url))
 
-        response = retry(requests.get, args=(url,), kwargs={'stream': True, 'timeout': 30}, times=5, delay=1, factor=2)
+        response = retry(requests.get, args=(url,), kwargs={'stream': True, 'timeout': 30}, times=5, delay=5, factor=2)
         if response.status_code == 200:
             response.raw.decode_content = True
 
@@ -568,3 +568,12 @@ def r3us_to_flat_project():
         'Box container': 'box_container',
         'Pegboard': 'pegboard',
     }, job_size=50, n_jobs=10)
+
+
+retry(
+    r3us_to_flat_project,
+    times=10,
+    delay=30,
+    factor=1,
+    exc_types=(Exception, )
+)
