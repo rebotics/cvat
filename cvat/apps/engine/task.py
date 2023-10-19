@@ -427,7 +427,7 @@ def _download_s3_files(db_data: models.Data, upload_dir, rename_files=False):
                 shutil.copyfileobj(response.raw, output_file)
 
             new_name = fix_filename(name, output_path, file)
-            name = _check_filename_collisions(name, local_files, rename_files)
+            new_name = _check_filename_collisions(new_name, local_files, rename_files)
             if new_name != name:
                 new_path = os.path.join(upload_dir, new_name)
                 os.rename(output_path, new_path)
