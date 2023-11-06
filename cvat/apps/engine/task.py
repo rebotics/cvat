@@ -365,7 +365,7 @@ def _download_data(db_data: models.Data, upload_dir, rename_files=False):
         job.meta['status'] = '{} is being downloaded..'.format(url)
         job.save_meta()
 
-        response = retry(requests.get, args=(url,), kwargs={'stream': True, 'timeout': 30}, times=5, delay=1, factor=2)
+        response = retry(requests.get, args=(url,), kwargs={'stream': True, 'timeout': 30}, times=5, delay=5, factor=2)
         if response.status_code == 200:
             response.raw.decode_content = True
             output_path = os.path.join(upload_dir, name)
@@ -402,7 +402,7 @@ def _download_s3_files(db_data: models.Data, upload_dir, rename_files=False):
         job.meta['status'] = 'S3 {} is  being downloaded...'.format(url)
         job.save_meta()
 
-        response = retry(requests.get, args=(url,), kwargs={'stream': True, 'timeout': 30}, times=5, delay=1, factor=2)
+        response = retry(requests.get, args=(url,), kwargs={'stream': True, 'timeout': 30}, times=5, delay=5, factor=2)
         if response.status_code == 200:
             response.raw.decode_content = True
             output_path = os.path.join(upload_dir, name)
@@ -410,7 +410,7 @@ def _download_s3_files(db_data: models.Data, upload_dir, rename_files=False):
                 shutil.copyfileobj(response.raw, output_file)
 
             new_name = fix_filename(name, output_path, file)
-            name = _check_filename_collisions(name, local_files, rename_files)
+            new_name = _check_filename_collisions(new_name, local_files, rename_files)
             if new_name != name:
                 new_path = os.path.join(upload_dir, new_name)
                 os.rename(output_path, new_path)
@@ -419,7 +419,7 @@ def _download_s3_files(db_data: models.Data, upload_dir, rename_files=False):
                 with open(rel_path, 'rb') as f:
                     models.S3File.objects.create(
                         data=db_data,
-                        file=File(f, name=new_name)
+                        file=File(f, name=new_name),
                     )
                 try:
                     file.file.delete()
