@@ -1,5 +1,6 @@
 import os
 import requests
+from typing import Union
 from io import BytesIO, IOBase
 from tempfile import SpooledTemporaryFile, NamedTemporaryFile
 from cvat.rebotics.utils import setting
@@ -111,6 +112,36 @@ class S3Client:
 
     def delete_tags(self, key: str):
         return self._client.delete_object_tagging(Bucket=self.bucket, Key=self._key(key))
+
+    def init_multipart(self, key: str) -> str:
+        response = self._client.create_multipart_upload(Bucket=self.bucket, Key=self._key(key))
+        return response['UploadId']
+
+    def add_part(self, key: str, upload_id: str, part_number: int, body: Union[bytes, IOBase]) -> str:
+        response = self._client.upload_part(
+            Bucket=self.bucket, Key=self._key(key),
+            UploadId=upload_id, PartNumber=part_number, Body=body,
+        )
+        return response['ETag']
+
+    def complete_multipart(self, key: str, upload_id: str, tags: list):
+        return self._client.complete_multipart_upload(
+            Bucket=self.bucket, Key=self._key(key),
+            UploadId=upload_id, MultipartUpload={'Parts': [
+                {'ETag': tag, 'PartNumber': i}
+                for i, tag in enumerate(tags)
+            ]},
+        )
+
+    def abort_multipart(self, key: str, upload_id: str):
+        return self._client.abort_multipart_upload(Bucket=self.bucket, Key=self._key(key), UploadId=upload_id)
+
+    def list_parts(self, key: str, upload_id: str):
+        response = self._client.list_parts(Bucket=self.bucket, Key=self._key(key), UploadId=upload_id)
+        return response['Parts'] if 'Parts' in response else []
+
+    def head_object(self, key: str):
+        return self._client.head_object(Bucket=self.bucket, Key=self._key(key))
 
     def _key(self, key: str) -> str:
         return os.path.join(settings.AWS_LOCATION, key)
