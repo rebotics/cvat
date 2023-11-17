@@ -78,7 +78,7 @@ class S3Client:
     def get_presigned_post(self, key: str) -> dict:
         dest = self._client.generate_presigned_post(
             self.bucket,
-            key,
+            self._key(key),
         )
 
         if settings.ENVIRONMENT == 'local' and 'minio' in dest['url'][:15]:
@@ -99,7 +99,7 @@ class S3Client:
             raise S3ClientError('Failed to post io to s3: {}'.format(response.content))
 
     def delete_object(self, key: str) -> bool:
-        return self._client.delete_object(self.bucket, self._key(key))
+        return self._client.delete_object(Bucket=self.bucket, Key=self._key(key))
 
     def set_tags(self, key: str, tags: dict) -> dict:
         return self._client.put_object_tagging(Bucket=self.bucket, Key=self._key(key), Tagging={

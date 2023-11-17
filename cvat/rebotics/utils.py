@@ -2,6 +2,8 @@ from enum import Enum
 from django.conf import settings
 from django.db import models
 from django.utils.translation import ugettext_lazy as _
+import time
+from typing import Callable
 
 
 class InjectionError(AttributeError):
@@ -86,3 +88,36 @@ def fix_between(value, min, max):
     if value > max:
         return max
     return value
+
+
+def retry(func: Callable, args=None, kwargs=None,
+          exc_types=None, times=1, delay=0, factor=1):
+    if args is None:
+        args = ()
+    if kwargs is None:
+        kwargs = {}
+    if exc_types is None:
+        exc_types = (Exception, )
+    if times < 1:
+        times = 1
+    if delay < 0:
+        delay = 0
+    if factor < 0:
+        factor = 0
+
+    try:
+        return func(*args, **kwargs)
+    except exc_types as e:
+        exc = e
+    times -= 1
+
+    while times > 0:
+        time.sleep(delay)
+        try:
+            return func(*args, **kwargs)
+        except exc_types as e:
+            exc = e
+        times -= 1
+        delay *= factor
+
+    raise exc

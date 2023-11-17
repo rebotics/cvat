@@ -7,7 +7,6 @@ import itertools
 import os
 import sys
 import imghdr
-import time
 
 from rest_framework.serializers import ValidationError
 import rq
@@ -22,7 +21,6 @@ import ipaddress
 import dns.resolver
 import django_rq
 import pytz
-from typing import Callable
 
 from django.conf import settings
 from django.db import transaction
@@ -42,6 +40,7 @@ from utils.dataset_manifest.utils import detect_related_images
 from .cloud_provider import db_storage_to_storage_instance
 
 from cvat.rebotics.s3_client import s3_client
+from cvat.rebotics.utils import retry
 
 
 ############################# Low Level server API
@@ -317,39 +316,6 @@ def _check_filename_collisions(name, files, rename_files):
         else:
             raise Exception("filename collision: {}".format(name))
     return name
-
-
-def retry(func: Callable, args=None, kwargs=None,
-          exc_types=None, times=1, delay=0, factor=1):
-    if args is None:
-        args = ()
-    if kwargs is None:
-        kwargs = {}
-    if exc_types is None:
-        exc_types = (Exception, )
-    if times < 1:
-        times = 1
-    if delay < 0:
-        delay = 0
-    if factor < 0:
-        factor = 0
-
-    try:
-        return func(*args, **kwargs)
-    except exc_types as e:
-        exc = e
-    times -= 1
-
-    while times > 0:
-        time.sleep(delay)
-        try:
-            return func(*args, **kwargs)
-        except exc_types as e:
-            exc = e
-        times -= 1
-        delay *= factor
-
-    raise exc
 
 
 def _download_data(db_data: models.Data, upload_dir, rename_files=False):

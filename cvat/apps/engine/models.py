@@ -472,6 +472,9 @@ class Task(models.Model):
     def get_tmp_dirname(self):
         return os.path.join(self.get_dirname(), "tmp")
 
+    def get_s3_tmp_dirname(self):
+        return f'tmp/tasks/{self.pk}'
+
     def __str__(self):
         return self.name
 
