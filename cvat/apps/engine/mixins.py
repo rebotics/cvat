@@ -18,7 +18,7 @@ from rq.job import JobStatus
 
 from cvat.apps.engine.models import Location
 from cvat.apps.engine.location import StorageType, get_location_configuration
-from cvat.apps.engine.serializers import DataSerializer, LabeledDataSerializer
+from cvat.apps.engine.serializers import DataSerializer, LabeledDataSerializer, S3UploadSerializer
 from cvat.apps.webhooks.signals import signal_update, signal_create, signal_delete
 from rebotics.s3_client import s3_client
 
@@ -365,36 +365,52 @@ class DestroyModelMixin(mixins.DestroyModelMixin):
 
 
 class S3UploadMixin:
-    def init_s3_upload(self, queue_name: str, rq_id: str, s3_key: str):
-        queue = django_rq.get_queue(queue_name)
-        rq_job = queue.fetch_job(rq_id)
+    def s3_upload(self, request):
+        if request.method == 'GET':
+            return self.check_upload_status()
+
+        elif request.method == 'POST':
+            serializer = self.get_s3_serializer_class()(data=request.data)
+            if serializer.is_valid():
+                return self.init_s3_upload(serializer.validated_data)
+            else:
+                return Response(data=serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        elif request.method == 'PUT':
+            serializer = self.get_s3_serializer_class()(data=request.data)
+            if serializer.is_valid():
+                return self.complete_s3_upload(serializer.validated_data)
+            else:
+                return Response(data=serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def init_s3_upload(self, data):
+        queue = django_rq.get_queue(self.get_s3_queue_name())
+        rq_job = queue.fetch_job(self.get_s3_rq_id())
 
         if rq_job is None or rq_job.get_status() in (JobStatus.FINISHED, JobStatus.FAILED):
+            s3_key = self.get_s3_key(data)
             s3_dest = s3_client.get_presigned_post(s3_key)
             return Response(data=s3_dest, status=status.HTTP_200_OK)
         else:
             return Response({'message': 'Upload processing is already in progress'},
                             status=status.HTTP_400_BAD_REQUEST)
 
-    def complete_s3_upload(self, queue_name: str, rq_id: str,
-                           callback: Callable, args=None, kwargs=None):
-        queue = django_rq.get_queue(queue_name)
+    def complete_s3_upload(self, data):
+        queue = django_rq.get_queue(self.get_s3_queue_name())
+        rq_id = self.get_s3_rq_id()
         rq_job = queue.fetch_job(rq_id)
 
         if rq_job is None or rq_job.get_status() in (JobStatus.FINISHED, JobStatus.FAILED):
-            if args is None:
-                args = ()
-            if kwargs is None:
-                kwargs = {}
-            queue.enqueue_call(callback, args=args, kwargs=kwargs, job_id=rq_id)
+            queue.enqueue_call(self.get_s3_rq_func(), args=self.get_s3_rq_args(data),
+                               kwargs=self.get_s3_rq_kwargs(data), job_id=rq_id)
             return Response(status=status.HTTP_202_ACCEPTED)
         else:
             return Response({'message': 'Upload processing is already in progress'},
                             status=status.HTTP_400_BAD_REQUEST)
 
-    def check_s3_upload_status(self, queue_name: str, rq_id: str):
-        queue = django_rq.get_queue(queue_name)
-        rq_job = queue.fetch_job(rq_id)
+    def check_upload_status(self):
+        queue = django_rq.get_queue(self.get_s3_queue_name())
+        rq_job = queue.fetch_job(self.get_s3_rq_id())
 
         if rq_job is None:
             return Response(status=status.HTTP_404_NOT_FOUND)
@@ -406,3 +422,24 @@ class S3UploadMixin:
                 return Response(data={'message': rq_job.exc_info}, status=status.HTTP_400_BAD_REQUEST)
             else:
                 return Response(data={'status': job_status}, status=status.HTTP_200_OK)
+
+    def get_s3_serializer_class(self):
+        return S3UploadSerializer
+
+    def get_s3_queue_name(self):
+        return 'default'
+
+    def get_s3_rq_id(self):
+        return f'api/s3-upload'
+
+    def get_s3_key(self, data):
+        return f'tmp/{data["filename"]}'[:1024]
+
+    def get_s3_rq_func(self):
+        raise NotImplementedError
+
+    def get_s3_rq_args(self, data):
+        return ()
+
+    def get_s3_rq_kwargs(self, data):
+        return {}

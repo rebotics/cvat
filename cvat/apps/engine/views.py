@@ -1276,32 +1276,23 @@ class TaskViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
     )
     @action(detail=True, methods=['GET', 'POST', 'PUT'], url_path=r's3-annotations/?$')
     def s3_annotations(self, request, pk):
-        db_task: Task = self.get_object()
-        queue_name = 'default'
-        rq_id = f'api/tasks/{pk}/s3-annotations/upload'
+        self._object = self.get_object()
+        return self.s3_upload(request)
 
-        if request.method == 'GET':
-            return self.check_s3_upload_status(queue_name, rq_id)
+    def get_s3_serializer_class(self):
+        return S3AnnotationFileSerializer
 
-        elif request.method == 'POST':
-            serializer = S3AnnotationFileSerializer(data=request.data)
-            if serializer.is_valid():
-                filename = serializer.validated_data['file']
-                s3_key = os.path.join(db_task.get_s3_tmp_dirname(), filename)
-                return self.init_s3_upload(queue_name, rq_id, s3_key)
-            else:
-                return Response(data=serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    def get_s3_rq_id(self):
+        return f'api/tasks/{self._object.pk}/s3-annotations/upload'
 
-        elif request.method == 'PUT':
-            serializer = S3AnnotationFileSerializer(data=request.data)
-            if serializer.is_valid():
-                filename = serializer.validated_data['file']
-                format_name = serializer.validated_data['format']
-                s3_key = os.path.join(db_task.get_s3_tmp_dirname(), filename)
-                return self.complete_s3_upload(queue_name, rq_id, import_from_s3,
-                                               args=(pk, s3_key, ImportType.TASK_ANNOTATIONS, format_name))
-            else:
-                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    def get_s3_key(self, data):
+        return os.path.join(self._object.get_s3_tmp_dirname(), data['file'])[:1024]
+
+    def get_s3_rq_func(self):
+        return import_from_s3
+
+    def get_s3_rq_args(self, data):
+        return self._object.pk, self.get_s3_key(data), ImportType.TASK_ANNOTATIONS, data['format']
 
     @extend_schema(methods=['PATCH'],
         operation_id='tasks_partial_update_annotations_file',

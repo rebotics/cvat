@@ -1432,6 +1432,10 @@ class S3AnnotationFileSerializer(serializers.Serializer):
         self.fields['format'].choices = [(f.DISPLAY_NAME, f.DISPLAY_NAME) for f in get_import_formats() if f.ENABLED]
 
 
+class S3UploadSerializer(serializers.Serializer):
+    filename = serializers.CharField(max_length=1024)
+
+
 def _update_related_storages(instance, validated_data):
     for storage in ('source_storage', 'target_storage'):
         new_conf = validated_data.pop(storage, None)
