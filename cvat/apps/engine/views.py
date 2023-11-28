@@ -75,7 +75,8 @@ from cvat.apps.engine.serializers import (
 from utils.dataset_manifest import ImageManifestManager
 from cvat.apps.engine.utils import av_scan_paths, process_failed_job, configure_dependent_job
 from cvat.apps.engine import backup
-from cvat.apps.engine.mixins import PartialUpdateModelMixin, UploadMixin, AnnotationMixin, SerializeMixin, DestroyModelMixin
+from cvat.apps.engine.mixins import PartialUpdateModelMixin, UploadMixin, AnnotationMixin, SerializeMixin,\
+    DestroyModelMixin, S3UploadMixin
 from cvat.apps.engine.location import get_location_configuration, StorageType
 from cvat.apps.engine.constants import FrameQuality
 
@@ -743,7 +744,8 @@ class DataChunkGetter:
 )
 class TaskViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
     mixins.RetrieveModelMixin, mixins.CreateModelMixin, DestroyModelMixin,
-    PartialUpdateModelMixin, UploadMixin, AnnotationMixin, SerializeMixin
+    PartialUpdateModelMixin, UploadMixin, AnnotationMixin, SerializeMixin,
+    S3UploadMixin,
 ):
     queryset = Task.objects.prefetch_related(
             Prefetch('label_set', queryset=models.Label.objects.order_by('id')),
@@ -1262,7 +1264,6 @@ class TaskViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
         request=S3AnnotationFileSerializer,
         responses={
             '200': OpenApiResponse(description='Presigned s3 url for uploading file.'),
-            '400': OpenApiResponse(description='Bad request'),
         },
     )
     @extend_schema(
@@ -1271,7 +1272,6 @@ class TaskViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
         request=S3AnnotationFileSerializer,
         responses={
             '202': OpenApiResponse(description='Import started'),
-            '400': OpenApiResponse(description='Bad request'),
         },
     )
     @action(detail=True, methods=['GET', 'POST', 'PUT'], url_path=r's3-annotations/?$')
@@ -1280,70 +1280,28 @@ class TaskViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
         queue_name = 'default'
         rq_id = f'api/tasks/{pk}/s3-annotations/upload'
 
-        # check status
         if request.method == 'GET':
-            queue = django_rq.get_queue(queue_name)
-            rq_job = queue.fetch_job(rq_id)
-            if rq_job is None:
-                return Response(status=status.HTTP_404_NOT_FOUND)
-            else:
-                job_status = rq_job.get_status()
-                if job_status == JobStatus.FINISHED:
-                    return Response(status=status.HTTP_201_CREATED)
-                elif job_status == JobStatus.FAILED:
-                    return Response(data={'message': rq_job.exc_info}, status=status.HTTP_400_BAD_REQUEST)
-                else:
-                    return Response(data={'status': job_status}, status=status.HTTP_200_OK)
+            return self.check_s3_upload_status(queue_name, rq_id)
 
-        # prepare upload
         elif request.method == 'POST':
             serializer = S3AnnotationFileSerializer(data=request.data)
             if serializer.is_valid():
-                queue = django_rq.get_queue(queue_name)
-                rq_job = queue.fetch_job(rq_id)
-
-                if rq_job is None or rq_job.get_status() in (JobStatus.FINISHED, JobStatus.FAILED):
-                    filename = serializer.validated_data['file']
-                    key = os.path.join(db_task.get_s3_tmp_dirname(), filename)
-
-                    s3_dest = s3_client.get_presigned_post(key)
-                    return Response(data=s3_dest, status=status.HTTP_200_OK)
-                else:
-                    user = rq_job.meta.get('user', None)
-                    return Response({'message': f'Import is already in progress by user {user}'},
-                                    status=status.HTTP_400_BAD_REQUEST)
+                filename = serializer.validated_data['file']
+                s3_key = os.path.join(db_task.get_s3_tmp_dirname(), filename)
+                return self.init_s3_upload(queue_name, rq_id, s3_key)
             else:
                 return Response(data=serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        # start import
         elif request.method == 'PUT':
             serializer = S3AnnotationFileSerializer(data=request.data)
             if serializer.is_valid():
-                queue = django_rq.get_queue(queue_name)
-                rq_job = queue.fetch_job(rq_id)
-                if rq_job is None or rq_job.get_status() in (JobStatus.FINISHED, JobStatus.FAILED):
-                    filename = serializer.validated_data['file']
-                    key = os.path.join(db_task.get_s3_tmp_dirname(), filename)
-                    format_name = serializer.validated_data['format']
-
-                    rq_job = queue.enqueue_call(
-                        import_from_s3,
-                        args=(pk, key, ImportType.TASK_ANNOTATIONS, format_name),
-                        job_id=rq_id,
-                    )
-                    rq_job.meta['user'] = request.user.username
-                    rq_job.save_meta()
-
-                    return Response(status=status.HTTP_202_ACCEPTED)
-                else:
-                    user = rq_job.meta.get('user', None)
-                    return Response({'message': f'Import is already in progress by user {user}'},
-                                    status=status.HTTP_400_BAD_REQUEST)
+                filename = serializer.validated_data['file']
+                format_name = serializer.validated_data['format']
+                s3_key = os.path.join(db_task.get_s3_tmp_dirname(), filename)
+                return self.complete_s3_upload(queue_name, rq_id, import_from_s3,
+                                               args=(pk, s3_key, ImportType.TASK_ANNOTATIONS, format_name))
             else:
                 return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        else:
-            return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
-
 
     @extend_schema(methods=['PATCH'],
         operation_id='tasks_partial_update_annotations_file',

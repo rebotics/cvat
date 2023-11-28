@@ -6,17 +6,22 @@
 import os
 import base64
 import uuid
+from typing import Callable
 
 from django.conf import settings
 from django.core.cache import cache
 from distutils.util import strtobool
 from rest_framework import status, mixins
 from rest_framework.response import Response
+import django_rq
+from rq.job import JobStatus
 
 from cvat.apps.engine.models import Location
 from cvat.apps.engine.location import StorageType, get_location_configuration
 from cvat.apps.engine.serializers import DataSerializer, LabeledDataSerializer
 from cvat.apps.webhooks.signals import signal_update, signal_create, signal_delete
+from rebotics.s3_client import s3_client
+
 
 class TusFile:
     _tus_cache_timeout = 3600
@@ -357,3 +362,47 @@ class DestroyModelMixin(mixins.DestroyModelMixin):
     def perform_destroy(self, instance):
         signal_delete.send(self, instance=instance)
         super().perform_destroy(instance)
+
+
+class S3UploadMixin:
+    def init_s3_upload(self, queue_name: str, rq_id: str, s3_key: str):
+        queue = django_rq.get_queue(queue_name)
+        rq_job = queue.fetch_job(rq_id)
+
+        if rq_job is None or rq_job.get_status() in (JobStatus.FINISHED, JobStatus.FAILED):
+            s3_dest = s3_client.get_presigned_post(s3_key)
+            return Response(data=s3_dest, status=status.HTTP_200_OK)
+        else:
+            return Response({'message': 'Upload processing is already in progress'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+    def complete_s3_upload(self, queue_name: str, rq_id: str,
+                           callback: Callable, args=None, kwargs=None):
+        queue = django_rq.get_queue(queue_name)
+        rq_job = queue.fetch_job(rq_id)
+
+        if rq_job is None or rq_job.get_status() in (JobStatus.FINISHED, JobStatus.FAILED):
+            if args is None:
+                args = ()
+            if kwargs is None:
+                kwargs = {}
+            queue.enqueue_call(callback, args=args, kwargs=kwargs, job_id=rq_id)
+            return Response(status=status.HTTP_202_ACCEPTED)
+        else:
+            return Response({'message': 'Upload processing is already in progress'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+    def check_s3_upload_status(self, queue_name: str, rq_id: str):
+        queue = django_rq.get_queue(queue_name)
+        rq_job = queue.fetch_job(rq_id)
+
+        if rq_job is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        else:
+            job_status = rq_job.get_status()
+            if job_status == JobStatus.FINISHED:
+                return Response(status=status.HTTP_201_CREATED)
+            elif job_status == JobStatus.FAILED:
+                return Response(data={'message': rq_job.exc_info}, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                return Response(data={'status': job_status}, status=status.HTTP_200_OK)
