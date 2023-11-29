@@ -42,3 +42,26 @@ def import_from_s3(obj_pk: int, s3_key: str, import_type: str, format_name: str)
             s3_client.delete_object(s3_key)
         except Exception as e:
             slogger.glob.warn(e)
+
+
+def restore_s3_backup(obj_pk: int, s3_key: str):
+    slogger.glob.info(f'Downloading {s3_key}')
+    filename = retry(s3_client.download_to_temp, args=(s3_key,),
+                     kwargs={'prefix': f'cvat_backup_{obj_pk}_'},
+                     times=5, delay=5, factor=2)
+    try:
+        slogger.glob.info(f'Restoring backup {obj_pk}')
+        # do some backup restoration here
+        ...
+    finally:
+        try:
+            slogger.glob.info(f'Removing {filename}')
+            os.remove(filename)
+        except FileNotFoundError as e:
+            slogger.glob.warn(e)
+
+        try:
+            slogger.glob.info(f'Deleting {s3_key}')
+            s3_client.delete_object(s3_key)
+        except Exception as e:
+            slogger.glob.warn(e)

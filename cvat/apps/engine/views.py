@@ -69,7 +69,7 @@ from cvat.apps.engine.serializers import (
     RqStatusSerializer, TaskReadSerializer, TaskWriteSerializer, UserSerializer, PluginsSerializer, IssueReadSerializer,
     IssueWriteSerializer, CommentReadSerializer, CommentWriteSerializer, CloudStorageWriteSerializer,
     CloudStorageReadSerializer, DatasetFileSerializer, JobCommitSerializer,
-    ProjectFileSerializer, TaskFileSerializer, S3DataSerializer, S3AnnotationFileSerializer,
+    ProjectFileSerializer, TaskFileSerializer, S3DataSerializer, S3ImportSerializer, S3UploadSerializer,
 )
 
 from utils.dataset_manifest import ImageManifestManager
@@ -88,7 +88,7 @@ from cvat.apps.iam.permissions import (CloudStoragePermission,
 
 from cvat.rebotics.s3_client import s3_client
 from cvat.rebotics.storage import create_pre_signed_post
-from .s3_import import import_from_s3, ImportType
+from .s3_import import import_from_s3, ImportType, restore_s3_backup
 
 
 @extend_schema(tags=['server'])
@@ -282,7 +282,8 @@ class ServerViewSet(viewsets.ViewSet):
 )
 class ProjectViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
     mixins.RetrieveModelMixin, mixins.CreateModelMixin, DestroyModelMixin,
-    PartialUpdateModelMixin, UploadMixin, AnnotationMixin, SerializeMixin
+    PartialUpdateModelMixin, UploadMixin, AnnotationMixin, SerializeMixin,
+    S3UploadMixin,
 ):
     queryset = models.Project.objects.prefetch_related(Prefetch('label_set',
         queryset=models.Label.objects.order_by('id')
@@ -596,6 +597,88 @@ class ProjectViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
         serializer_class=None)
     def append_backup_chunk(self, request, file_id):
         return self.append_tus_chunk(request, file_id)
+
+    @extend_schema(
+        methods=['GET'],
+        summary='Checks import status.',
+        request=OpenApiTypes.NONE,
+        responses={
+            '200': OpenApiResponse(description='Import is in progress'),
+            '201': OpenApiResponse(description='Import finished'),
+            '400': OpenApiResponse(description='Import failed'),
+            '404': OpenApiResponse(description='Import not found'),
+        }
+    )
+    @extend_schema(
+        methods=['POST'],
+        summary='Prepares file uploading to s3. Returns presigned s3 url.',
+        request=S3ImportSerializer,
+        responses={
+            '200': OpenApiResponse(description='Presigned s3 url for uploading file.'),
+        },
+    )
+    @extend_schema(
+        methods=['PUT'],
+        summary='Starts uploaded file processing or checks its status.',
+        request=S3ImportSerializer,
+        responses={
+            '202': OpenApiResponse(description='Import started'),
+        },
+    )
+    @action(detail=True, methods=['GET', 'POST', 'PUT'], url_path=r's3-dataset/?$')
+    def s3_dataset(self, request, pk):
+        self._object: Project = self.get_object()
+        return self.s3_upload(request)
+
+    @extend_schema(
+        methods=['GET'],
+        summary='Checks import status.',
+        request=OpenApiTypes.NONE,
+        responses={
+            '200': OpenApiResponse(description='Import is in progress'),
+            '201': OpenApiResponse(description='Import finished'),
+            '400': OpenApiResponse(description='Import failed'),
+            '404': OpenApiResponse(description='Import not found'),
+        }
+    )
+    @extend_schema(
+        methods=['POST'],
+        summary='Prepares file uploading to s3. Returns presigned s3 url.',
+        request=S3UploadSerializer,
+        responses={
+            '200': OpenApiResponse(description='Presigned s3 url for uploading file.'),
+        },
+    )
+    @extend_schema(
+        methods=['PUT'],
+        summary='Starts uploaded file processing or checks its status.',
+        request=S3UploadSerializer,
+        responses={
+            '202': OpenApiResponse(description='Import started'),
+        },
+    )
+    @action(detail=True, methods=['GET', 'POST', 'PUT'], url_path=r's3-backup/?$')
+    def s3_backup(self, request, pk):
+        self._object: Project = self.get_object()
+        return self.s3_upload(request)
+
+    def get_s3_serializer_class(self):
+        return S3ImportSerializer if self.action == 's3_dataset' else S3UploadSerializer
+
+    def get_s3_rq_id(self):
+        return f'api/projects/{self._object.pk}/upload'
+
+    def get_s3_key(self, data):
+        return os.path.join(self._object.get_s3_tmp_dirname(), data['filename'])[:1024]
+
+    def get_s3_rq_func(self):
+        return import_from_s3 if self.action == 's3_dataset' else restore_s3_backup
+
+    def get_s3_rq_args(self, data):
+        args = [self._object.pk, self.get_s3_key(data)]
+        if self.action == 's3_dataset':
+            args += [ImportType.TASK_ANNOTATIONS, data['format']]
+        return args
 
     @staticmethod
     def _get_rq_response(queue, job_id):
@@ -1261,7 +1344,7 @@ class TaskViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
     @extend_schema(
         methods=['POST'],
         summary='Prepares file uploading to s3. Returns presigned s3 url.',
-        request=S3AnnotationFileSerializer,
+        request=S3ImportSerializer,
         responses={
             '200': OpenApiResponse(description='Presigned s3 url for uploading file.'),
         },
@@ -1269,24 +1352,24 @@ class TaskViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
     @extend_schema(
         methods=['PUT'],
         summary='Starts uploaded file processing or checks its status.',
-        request=S3AnnotationFileSerializer,
+        request=S3ImportSerializer,
         responses={
             '202': OpenApiResponse(description='Import started'),
         },
     )
     @action(detail=True, methods=['GET', 'POST', 'PUT'], url_path=r's3-annotations/?$')
     def s3_annotations(self, request, pk):
-        self._object = self.get_object()
+        self._object: Task = self.get_object()
         return self.s3_upload(request)
 
     def get_s3_serializer_class(self):
-        return S3AnnotationFileSerializer
+        return S3ImportSerializer
 
     def get_s3_rq_id(self):
         return f'api/tasks/{self._object.pk}/s3-annotations/upload'
 
     def get_s3_key(self, data):
-        return os.path.join(self._object.get_s3_tmp_dirname(), data['file'])[:1024]
+        return os.path.join(self._object.get_s3_tmp_dirname(), data['filename'])[:1024]
 
     def get_s3_rq_func(self):
         return import_from_s3
@@ -1443,7 +1526,8 @@ class TaskViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
         })
 )
 class JobViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
-    mixins.RetrieveModelMixin, PartialUpdateModelMixin, UploadMixin, AnnotationMixin
+    mixins.RetrieveModelMixin, PartialUpdateModelMixin, UploadMixin, AnnotationMixin,
+    S3UploadMixin,
 ):
     queryset = Job.objects.all()
     iam_organization_field = 'segment__task__organization'
@@ -1647,6 +1731,52 @@ class JobViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
                     return Response(data=str(e), status=status.HTTP_400_BAD_REQUEST)
                 return Response(data)
 
+    @extend_schema(
+        methods=['GET'],
+        summary='Checks import status.',
+        request=OpenApiTypes.NONE,
+        responses={
+            '200': OpenApiResponse(description='Import is in progress'),
+            '201': OpenApiResponse(description='Import finished'),
+            '400': OpenApiResponse(description='Import failed'),
+            '404': OpenApiResponse(description='Import not found'),
+        }
+    )
+    @extend_schema(
+        methods=['POST'],
+        summary='Prepares file uploading to s3. Returns presigned s3 url.',
+        request=S3ImportSerializer,
+        responses={
+            '200': OpenApiResponse(description='Presigned s3 url for uploading file.'),
+        },
+    )
+    @extend_schema(
+        methods=['PUT'],
+        summary='Starts uploaded file processing or checks its status.',
+        request=S3ImportSerializer,
+        responses={
+            '202': OpenApiResponse(description='Import started'),
+        },
+    )
+    @action(detail=True, methods=['GET', 'POST', 'PUT'], url_path=r's3-annotations/?$')
+    def s3_annotations(self, request, pk):
+        self._object: Job = self.get_object()
+        return self.s3_upload(request)
+
+    def get_s3_serializer_class(self):
+        return S3ImportSerializer
+
+    def get_s3_rq_id(self):
+        return f'api/jobs/{self._object.pk}/s3-annotations/upload'
+
+    def get_s3_key(self, data):
+        return os.path.join(self._object.get_s3_tmp_dirname(), data['filename'])[:1024]
+
+    def get_s3_rq_func(self):
+        return import_from_s3
+
+    def get_s3_rq_args(self, data):
+        return self._object.pk, self.get_s3_key(data), ImportType.JOB_ANNOTATIONS, data['format']
 
     @extend_schema(methods=['PATCH'],
         operation_id='jobs_partial_update_annotations_file',

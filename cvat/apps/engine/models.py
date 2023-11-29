@@ -413,6 +413,9 @@ class Project(models.Model):
     def get_log_path(self):
         return os.path.join(self.get_project_logs_dirname(), "project.log")
 
+    def get_s3_tmp_dirname(self):
+        return f'tmp/projects/{self.pk}'
+
     # Extend default permission model
     class Meta:
         default_permissions = ()
@@ -620,6 +623,9 @@ class Job(models.Model):
             data = self.segment.task.data
         return os.path.join(data.get_s3_data_dirname(), 'jobs',
                             str(self.pk), self.preview_file_name)
+
+    def get_s3_tmp_dirname(self):
+        return f'tmp/jobs/{self.pk}'
 
     class Meta:
         default_permissions = ()

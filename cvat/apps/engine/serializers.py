@@ -1419,8 +1419,11 @@ class RelatedFileSerializer(serializers.ModelSerializer):
         read_only_fields = ('path',)
 
 
-class S3AnnotationFileSerializer(serializers.Serializer):
-    file = serializers.CharField(max_length=512)
+class S3UploadSerializer(serializers.Serializer):
+    filename = serializers.CharField(max_length=1024)
+
+
+class S3ImportSerializer(S3UploadSerializer):
     format = serializers.ChoiceField(choices=())
 
     def __init__(self, *args, **kwargs):
@@ -1430,10 +1433,6 @@ class S3AnnotationFileSerializer(serializers.Serializer):
     def _set_format_choices(self):
         from cvat.apps.dataset_manager.views import get_import_formats
         self.fields['format'].choices = [(f.DISPLAY_NAME, f.DISPLAY_NAME) for f in get_import_formats() if f.ENABLED]
-
-
-class S3UploadSerializer(serializers.Serializer):
-    filename = serializers.CharField(max_length=1024)
 
 
 def _update_related_storages(instance, validated_data):
