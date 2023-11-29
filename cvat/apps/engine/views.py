@@ -40,7 +40,6 @@ from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied
 from django_sendfile import sendfile
-from rq.job import JobStatus
 
 from cvat.apps.webhooks.signals import signal_create, signal_update
 import cvat.apps.dataset_manager as dm
@@ -657,28 +656,34 @@ class ProjectViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
             '202': OpenApiResponse(description='Import started'),
         },
     )
-    @action(detail=True, methods=['GET', 'POST', 'PUT'], url_path=r's3-backup/?$')
-    def s3_backup(self, request, pk):
-        self._object: Project = self.get_object()
+    @action(detail=False, methods=['GET', 'POST', 'PUT'], url_path=r's3-backup/?$')
+    def s3_backup(self, request):
         return self.s3_upload(request)
 
     def get_s3_serializer_class(self):
         return S3ImportSerializer if self.action == 's3_dataset' else S3UploadSerializer
 
     def get_s3_rq_id(self):
-        return f'api/projects/{self._object.pk}/upload'
+        if self.action == 's3_dataset':
+            return f'api/projects/{self._object.pk}/dataset/upload'
+        else:
+            return f'api/projects/backup/upload'
 
     def get_s3_key(self, data):
-        return os.path.join(self._object.get_s3_tmp_dirname(), data['filename'])[:1024]
+        if self.action == 's3_dataset':
+            return os.path.join(self._object.get_s3_tmp_dirname(), data['filename'])[:1024]
+        else:
+            return os.path.join('tmp/projects/backup', data['filename'])[:1024]
 
     def get_s3_rq_func(self):
         return import_from_s3 if self.action == 's3_dataset' else restore_s3_backup
 
     def get_s3_rq_args(self, data):
-        args = [self._object.pk, self.get_s3_key(data)]
         if self.action == 's3_dataset':
-            args += [ImportType.TASK_ANNOTATIONS, data['format']]
-        return args
+            return self._object.pk, self.get_s3_key(data), ImportType.PROJECT_DATASET, data['format']
+        else:
+            return (self.get_s3_key(data), ImportType.PROJECT_BACKUP, self.request.user.pk,
+                    getattr(self.request.iam_context['organization'], 'id', None))
 
     @staticmethod
     def _get_rq_response(queue, job_id):
@@ -1362,20 +1367,61 @@ class TaskViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
         self._object: Task = self.get_object()
         return self.s3_upload(request)
 
+    @extend_schema(
+        methods=['GET'],
+        summary='Checks import status.',
+        request=OpenApiTypes.NONE,
+        responses={
+            '200': OpenApiResponse(description='Import is in progress'),
+            '201': OpenApiResponse(description='Import finished'),
+            '400': OpenApiResponse(description='Import failed'),
+            '404': OpenApiResponse(description='Import not found'),
+        }
+    )
+    @extend_schema(
+        methods=['POST'],
+        summary='Prepares file uploading to s3. Returns presigned s3 url.',
+        request=S3UploadSerializer,
+        responses={
+            '200': OpenApiResponse(description='Presigned s3 url for uploading file.'),
+        },
+    )
+    @extend_schema(
+        methods=['PUT'],
+        summary='Starts uploaded file processing or checks its status.',
+        request=S3UploadSerializer,
+        responses={
+            '202': OpenApiResponse(description='Import started'),
+        },
+    )
+    @action(detail=False, methods=['GET', 'POST', 'PUT'], url_path=r's3-backup/?$')
+    def s3_backup(self, request):
+        return self.s3_upload(request)
+
     def get_s3_serializer_class(self):
-        return S3ImportSerializer
+        return S3ImportSerializer if self.action == 's3_annotations' else S3UploadSerializer
 
     def get_s3_rq_id(self):
-        return f'api/tasks/{self._object.pk}/s3-annotations/upload'
+        if self.action == 's3_annotations':
+            return f'api/tasks/{self._object.pk}/s3-annotations/upload'
+        else:
+            return f'api/tasks/backup/upload'
 
     def get_s3_key(self, data):
-        return os.path.join(self._object.get_s3_tmp_dirname(), data['filename'])[:1024]
+        if self.action == 's3_annotations':
+            return os.path.join(self._object.get_s3_tmp_dirname(), data['filename'])[:1024]
+        else:
+            return os.path.join('tmp/tasks/backup', data['filename'])[:1024]
 
     def get_s3_rq_func(self):
-        return import_from_s3
+        return import_from_s3 if self.action == 's3_annotations' else restore_s3_backup
 
     def get_s3_rq_args(self, data):
-        return self._object.pk, self.get_s3_key(data), ImportType.TASK_ANNOTATIONS, data['format']
+        if self.action == 's3_annotations':
+            return self._object.pk, self.get_s3_key(data), ImportType.TASK_ANNOTATIONS, data['format']
+        else:
+            return (self.get_s3_key(data), ImportType.TASK_BACKUP, self.request.user.pk,
+                    getattr(self.request.iam_context['organization'], 'id', None))
 
     @extend_schema(methods=['PATCH'],
         operation_id='tasks_partial_update_annotations_file',
