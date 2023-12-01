@@ -23,7 +23,7 @@ class _ImportAnnotationSerializer(_BaseImportSerializer):
     label = serializers.CharField(max_length=128)
     points = serializers.CharField(max_length=255, allow_null=True, default=None)
     type = serializers.CharField(max_length=255, allow_null=True, default=None)
-    upc = serializers.CharField(max_length=128)
+    upc = serializers.CharField(max_length=128, allow_blank=True, allow_null=True, default=None)
 
 
 class _ImportPriceTagSerializer(_BaseImportSerializer):
