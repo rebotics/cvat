@@ -74,6 +74,11 @@ class DataSerializerExtension(OpenApiSerializerExtension):
             _copy_serializer(instance, _new_type=_Override, context={'view': auto_schema.view}),
             direction, bypass_extensions=False)
 
+
+class S3DataSerializerExtension(DataSerializerExtension):
+    target_class = 'cvat.apps.engine.serializers.S3DataSerializer'
+
+
 class WriteOnceSerializerExtension(OpenApiSerializerExtension):
     """
     Enables support for cvat.apps.engine.serializers.WriteOnceMixin in drf-spectacular.
