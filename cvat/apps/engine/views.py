@@ -667,13 +667,13 @@ class ProjectViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
         if self.action == 's3_dataset':
             return f'api/projects/{self._object.pk}/dataset/upload'
         else:
-            return f'api/projects/backup/upload'
+            return f'api/projects/backup/{self.request.user.pk}/upload'
 
     def get_s3_key(self, data):
         if self.action == 's3_dataset':
             return os.path.join(self._object.get_s3_tmp_dirname(), data['filename'])[:1024]
         else:
-            return os.path.join('tmp/projects/backup', data['filename'])[:1024]
+            return os.path.join(f'tmp/projects/backup/{self.request.user.pk}', data['filename'])[:1024]
 
     def get_s3_rq_func(self):
         return import_from_s3 if self.action == 's3_dataset' else restore_s3_backup
@@ -1405,13 +1405,13 @@ class TaskViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
         if self.action == 's3_annotations':
             return f'api/tasks/{self._object.pk}/s3-annotations/upload'
         else:
-            return f'api/tasks/backup/upload'
+            return f'api/tasks/backup/{self.request.user.pk}/upload'
 
     def get_s3_key(self, data):
         if self.action == 's3_annotations':
             return os.path.join(self._object.get_s3_tmp_dirname(), data['filename'])[:1024]
         else:
-            return os.path.join('tmp/tasks/backup', data['filename'])[:1024]
+            return os.path.join(f'tmp/tasks/backup/{self.request.user.pk}', data['filename'])[:1024]
 
     def get_s3_rq_func(self):
         return import_from_s3 if self.action == 's3_annotations' else restore_s3_backup
