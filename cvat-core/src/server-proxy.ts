@@ -5,6 +5,7 @@
 
 import { StorageLocation, WebhookSourceType } from './enums';
 import { Storage } from './storage';
+import {AxiosResponse} from "axios";
 
 type Params = {
     org: number | string,
@@ -23,6 +24,11 @@ const tus = require('tus-js-client');
 const config = require('./config');
 const DownloadWorker = require('./download.worker');
 const { ServerError } = require('./exceptions');
+
+const s3Axios = Axios.create();
+delete s3Axios.defaults.headers.common.Authorization;
+s3Axios.defaults.withCredentials = false;
+s3Axios.defaults.params = {};
 
 function enableOrganization() {
     return { org: config.organizationID || '' };
@@ -142,6 +148,83 @@ function prepareData(details) {
         }
     }
     return data;
+}
+
+async function s3Upload(
+    target: string,
+    file: File,
+    data: Record<string, unknown> = null,
+    onUpdate: Function = null,
+    interval = 3000,
+) {
+    const { backendAPI, proxy } = config;
+    const params: Params = enableOrganization();
+    const url = `${backendAPI}/${target}`;
+    let response = null;
+
+    const apiData = data === null ? {} : data;
+    apiData.filename = file.name;
+
+    // 1. post data to target, init upload
+    try {
+        if (onUpdate) onUpdate({ message: 'Obtaining s3 destination...' });
+        response = await Axios.post(
+            url,
+            apiData,
+            { params, proxy, headers: { 'Content-Type': 'application/json' } },
+        );
+    } catch (errorData) {
+        throw generateError(errorData);
+    }
+
+    // 2. upload file to s3
+    const s3Data = response.data;
+
+    try {
+        if (onUpdate) onUpdate({ message: 'Uploading file to s3...' });
+        response = await s3Axios.post(
+            s3Data.url,
+            { ...s3Data.fields, file },
+            { headers: { 'Content-Type': 'multipart/form-data' } },
+        );
+    } catch (errorData) {
+        throw generateError(errorData);
+    }
+
+    // 3. put data to target, complete upload
+    try {
+        if (onUpdate) onUpdate({ message: 'Starting file processing...' });
+        response = await Axios.put(
+            url,
+            apiData,
+            { params, proxy, headers: { 'Content-Type': 'application/json' } },
+        );
+    } catch (errorData) {
+        throw generateError(errorData);
+    }
+
+    // 4. check processing status periodically until it finishes or fails.
+    return new Promise((resolve, reject) => {
+        async function wait(): Promise<void> {
+            try {
+                response = await Axios.get(url, { params, proxy });
+            } catch (errorData) {
+                reject(generateError(errorData));
+            }
+
+            if (response.status === 202) {
+                if (onUpdate) onUpdate(response.data);
+                setTimeout(wait, interval);
+            } else if (response.status === 201) {
+                resolve(response.data);
+            } else {
+                reject(new ServerError('Unknown response', response.status));
+            }
+        }
+
+        if (onUpdate) onUpdate({ message: 'File is being processed...' });
+        wait();
+    });
 }
 
 class WorkerWrappedAxios {
@@ -750,6 +833,28 @@ class ServerProxy {
             }
         }
 
+        async function importS3Dataset(
+            id: number,
+            format: string,
+            useDefaultLocation: boolean,
+            sourceStorage: Storage,
+            file: File | string,
+            onUpdate,
+        ) {
+            if (typeof file === 'string') {
+                return importDataset(id, format, useDefaultLocation, sourceStorage, file, onUpdate);
+            }
+
+            return s3Upload(
+                `projects/${id}/dataset`,
+                file,
+                { format },
+                onUpdate ? (data) => {
+                    if (data.message) onUpdate(data.message, data.progress || 0);
+                } : null,
+            );
+        }
+
         async function backupTask(id: number, targetStorage: Storage, useDefaultSettings: boolean, fileName?: string) {
             const { backendAPI } = config;
             const params: Params = {
@@ -851,6 +956,13 @@ class ServerProxy {
                     });
             }
             return wait();
+        }
+
+        async function restoreS3Task(storage: Storage, file: File | string) {
+            if (typeof file === 'string') return restoreTask(storage, file);
+            const result: any = await s3Upload('tasks/s3-backup', file);
+            const tasks = await getTasks({ id: result.id });
+            return tasks[0];
         }
 
         async function backupProject(
@@ -965,6 +1077,13 @@ class ServerProxy {
             return wait();
         }
 
+        async function restoreS3Project(storage: Storage, file: File | string) {
+            if (typeof file === 'string') return restoreProject(storage, file);
+            const result: any = await s3Upload('projects/s3-backup', file);
+            const projects = await getProjects({ id: result.id });
+            return projects[0];
+        }
+
         async function waitTask(id, onUpdate) {
             const { backendAPI, proxy } = config;
             const params = enableOrganization();
@@ -1055,10 +1174,6 @@ class ServerProxy {
 
             const s3Urls = response.data;
             onUpdate('Uploading data to s3...', null);
-            const s3Axios = Axios.create();
-            delete s3Axios.defaults.headers.common.Authorization;
-            s3Axios.defaults.withCredentials = false;
-            s3Axios.defaults.params = {};
             try {
                 for (let i = 0; i < s3Urls.length; i++) {
                     const { url, fields } = s3Urls[i];
@@ -1679,6 +1794,21 @@ class ServerProxy {
             } catch (errorData) {
                 throw generateError(errorData);
             }
+        }
+
+        async function uploadS3Annotations(
+            session,
+            id: number,
+            format: string,
+            useDefaultLocation: boolean,
+            sourceStorage: Storage,
+            file: File | string,
+        ) {
+            if (typeof file === 'string') {
+                return uploadAnnotations(session, id, format, useDefaultLocation, sourceStorage, file);
+            }
+
+            return s3Upload(`${session}s/${id}/annotations`, file, { format });
         }
 
         // Session is 'task' or 'job'
@@ -2374,8 +2504,8 @@ class ServerProxy {
                         delete: deleteProject,
                         exportDataset: exportDataset('projects'),
                         backup: backupProject,
-                        restore: restoreProject,
-                        importDataset,
+                        restore: restoreS3Project,
+                        importDataset: importS3Dataset,
                     }),
                     writable: false,
                 },
@@ -2388,7 +2518,7 @@ class ServerProxy {
                         delete: deleteTask,
                         exportDataset: exportDataset('tasks'),
                         backup: backupTask,
-                        restore: restoreTask,
+                        restore: restoreS3Task,
                     }),
                     writable: false,
                 },
@@ -2426,7 +2556,7 @@ class ServerProxy {
                         updateAnnotations,
                         getAnnotations,
                         dumpAnnotations,
-                        uploadAnnotations,
+                        uploadAnnotations: uploadS3Annotations,
                     }),
                     writable: false,
                 },
