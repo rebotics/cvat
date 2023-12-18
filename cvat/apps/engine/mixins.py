@@ -14,7 +14,7 @@ from distutils.util import strtobool
 from rest_framework import status, mixins
 from rest_framework.response import Response
 import django_rq
-from rq.job import JobStatus
+from rq.job import Job, JobStatus
 
 from cvat.apps.engine.models import Location
 from cvat.apps.engine.location import StorageType, get_location_configuration
@@ -393,7 +393,7 @@ class S3UploadMixin:
             return Response(data=s3_dest, status=status.HTTP_200_OK)
         else:
             return Response({'message': 'Upload processing is already in progress'},
-                            status=status.HTTP_400_BAD_REQUEST)
+                            status=status.HTTP_409_CONFLICT)
 
     def complete_s3_upload(self, data):
         queue = django_rq.get_queue(self.get_s3_queue_name())
@@ -406,7 +406,7 @@ class S3UploadMixin:
             return Response(status=status.HTTP_202_ACCEPTED)
         else:
             return Response({'message': 'Upload processing is already in progress'},
-                            status=status.HTTP_400_BAD_REQUEST)
+                            status=status.HTTP_409_CONFLICT)
 
     def check_upload_status(self):
         queue = django_rq.get_queue(self.get_s3_queue_name())
@@ -417,11 +417,12 @@ class S3UploadMixin:
         else:
             job_status = rq_job.get_status()
             if job_status == JobStatus.FINISHED:
-                return Response(status=status.HTTP_201_CREATED)
+                return Response(data=self.get_s3_result(rq_job), status=status.HTTP_201_CREATED)
             elif job_status == JobStatus.FAILED:
                 return Response(data={'message': rq_job.exc_info}, status=status.HTTP_400_BAD_REQUEST)
             else:
-                return Response(data={'status': job_status}, status=status.HTTP_200_OK)
+                progress = self.get_s3_progress(rq_job) or {'status': job_status}
+                return Response(data=progress, status=status.HTTP_202_ACCEPTED)
 
     def get_s3_serializer_class(self):
         return S3UploadSerializer
@@ -443,3 +444,9 @@ class S3UploadMixin:
 
     def get_s3_rq_kwargs(self, data):
         return {}
+
+    def get_s3_progress(self, rq_job):
+        return None
+
+    def get_s3_result(self, rq_job):
+        return None

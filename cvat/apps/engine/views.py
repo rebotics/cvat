@@ -685,6 +685,9 @@ class ProjectViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
             return (self.get_s3_key(data), ImportType.PROJECT_BACKUP, self.request.user.pk,
                     getattr(self.request.iam_context['organization'], 'id', None))
 
+    def get_s3_result(self, rq_job):
+        return None if self.action == 's3_dataset' else {'id': rq_job.return_value}
+
     @staticmethod
     def _get_rq_response(queue, job_id):
         queue = django_rq.get_queue(queue)
@@ -1422,6 +1425,9 @@ class TaskViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
         else:
             return (self.get_s3_key(data), ImportType.TASK_BACKUP, self.request.user.pk,
                     getattr(self.request.iam_context['organization'], 'id', None))
+
+    def get_s3_result(self, rq_job):
+        return None if self.action == 's3_annotations' else {'id': rq_job.return_value}
 
     @extend_schema(methods=['PATCH'],
         operation_id='tasks_partial_update_annotations_file',

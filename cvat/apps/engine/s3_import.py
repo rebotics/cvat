@@ -34,7 +34,7 @@ def import_from_s3(obj_pk: int, s3_key: str, import_type: str, format_name: str)
     try:
         import_func = _func_mapping.get(import_type)
         slogger.glob.info(f'Importing {import_type} {obj_pk}')
-        import_func(obj_pk, filename, format_name)
+        return import_func(obj_pk, filename, format_name)
     finally:
         try:
             slogger.glob.info(f'Removing {filename}')
@@ -57,7 +57,7 @@ def restore_s3_backup(s3_key: str, import_type: ImportType, user_id: int, org_id
     try:
         import_func = _func_mapping.get(import_type)
         slogger.glob.info(f'Restoring {import_type}')
-        import_func(filename, user_id, org_id)
+        return import_func(filename, user_id, org_id)
     finally:
         try:
             slogger.glob.info(f'Removing {filename}')
