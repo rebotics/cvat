@@ -208,17 +208,16 @@ async function s3Upload(
         async function wait(): Promise<void> {
             try {
                 response = await Axios.get(url, { params, proxy });
+                if (response.status === 202) {
+                    if (onUpdate) onUpdate(response.data);
+                    setTimeout(wait, interval);
+                } else if (response.status === 201) {
+                    resolve(response.data);
+                } else {
+                    reject(new ServerError('Unknown response', response.status));
+                }
             } catch (errorData) {
                 reject(generateError(errorData));
-            }
-
-            if (response.status === 202) {
-                if (onUpdate) onUpdate(response.data);
-                setTimeout(wait, interval);
-            } else if (response.status === 201) {
-                resolve(response.data);
-            } else {
-                reject(new ServerError('Unknown response', response.status));
             }
         }
 
@@ -846,7 +845,7 @@ class ServerProxy {
             }
 
             return s3Upload(
-                `projects/${id}/dataset`,
+                `projects/${id}/s3-dataset`,
                 file,
                 { format },
                 onUpdate ? (data) => {
@@ -1808,7 +1807,7 @@ class ServerProxy {
                 return uploadAnnotations(session, id, format, useDefaultLocation, sourceStorage, file);
             }
 
-            return s3Upload(`${session}s/${id}/annotations`, file, { format });
+            return s3Upload(`${session}s/${id}/s3-annotations`, file, { format });
         }
 
         // Session is 'task' or 'job'
