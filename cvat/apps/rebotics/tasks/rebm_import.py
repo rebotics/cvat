@@ -1,6 +1,5 @@
 import os
 import sys
-import random
 
 import django_rq
 from django.db import transaction
@@ -17,35 +16,13 @@ from cvat.apps.engine.views import TaskViewSet
 from cvat.apps.engine.media_extractors import sort
 from cvat.apps.engine.log import slogger
 from cvat.rebotics.s3_client import s3_client
+from cvat.rebotics.utils import fix_coordinates, rand_color
 
 from utils.dataset_manifest import S3ManifestManager
 
 User = get_user_model()
 
 # for incoming data reference see rebotics/example_import.json
-
-
-def _fix_coordinates(item, width, height):
-    if item['lowerx'] > item['upperx']:
-        item['lowerx'], item['upperx'] = item['upperx'], item['lowerx']
-    if item['lowery'] > item['uppery']:
-        item['lowery'], item['uppery'] = item['uppery'], item['lowery']
-    if item['lowerx'] < 0:
-        item['lowerx'] = 0
-    if item['upperx'] > width:
-        item['upperx'] = width
-    if item['lowery'] < 0:
-        item['lowery'] = 0
-    if item['uppery'] > height:
-        item['uppery'] = height
-
-
-def _rand_color():
-    choices = '0123456789ABCDEF'
-    color = '#'
-    for _ in range(6):
-        color += random.choice(choices)
-    return color
 
 
 class ShapesImporter:
@@ -67,7 +44,7 @@ class ShapesImporter:
             label, _ = Label.objects.get_or_create(
                 project_id=self.task.project_id,
                 name=item['label'],
-                defaults={'color': _rand_color()}
+                defaults={'color': rand_color()}
             )
             self.labels[item['label']] = label
 
@@ -109,7 +86,7 @@ class ShapesImporter:
         return spec
 
     def _import_item(self, item: dict, frame: int, group: int, image_size: tuple) -> None:
-        _fix_coordinates(item, *image_size)
+        fix_coordinates(item, *image_size)
         label = self._get_label(item)
 
         # annotation shape

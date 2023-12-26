@@ -1,3 +1,4 @@
+import random
 from enum import Enum
 from django.conf import settings
 from django.db import models
@@ -79,10 +80,23 @@ class DateAwareModel(models.Model):
         return self.date_modified.strftime(self.date_display_format)
 
 
-def fix_between(value, min, max):
-    """fixes a value between min and max"""
-    if value < min:
-        return min
-    if value > max:
-        return max
-    return value
+def fix_coordinates(item, width, height):
+    if item['lowerx'] > item['upperx']:
+        item['lowerx'], item['upperx'] = item['upperx'], item['lowerx']
+    if item['lowery'] > item['uppery']:
+        item['lowery'], item['uppery'] = item['uppery'], item['lowery']
+    if item['lowerx'] < 0:
+        item['lowerx'] = 0
+    if item['upperx'] > width:
+        item['upperx'] = width
+    if item['lowery'] < 0:
+        item['lowery'] = 0
+    if item['uppery'] > height:
+        item['uppery'] = height
+
+
+def rand_color():
+    color = '#'
+    for _ in range(6):
+        color += random.choice('0123456789ABCDEF')
+    return color

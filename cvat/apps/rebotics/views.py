@@ -13,7 +13,7 @@ from django.views.decorators.common import no_append_slash
 
 from .authentication import RetailerAuthentication
 from .serializers import ImportSerializer, ImportResponseSerializer
-from cvat.apps.rebotics import task as task_api
+from cvat.apps.rebotics.tasks import rebm_import as task_api
 
 
 @extend_schema(tags=['retailer_import'])
