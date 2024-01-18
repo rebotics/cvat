@@ -100,3 +100,45 @@ def rand_color():
     for _ in range(6):
         color += random.choice('0123456789ABCDEF')
     return color
+
+
+def save_ranges(data: list, ranges_sep=',', start_end_sep='-'):
+    result = []
+    if len(data) > 0:
+        start = 0
+        end = 0
+        for i in range(1, len(data)):
+            if data[i] - data[end] > 1:
+                result.append(str(data[start]) if start == end else f'{data[start]}{start_end_sep}{data[end]}')
+                start = i
+            end = i
+        result.append(str(data[start]) if start == end else f'{data[start]}{start_end_sep}{data[end]}')
+    return ranges_sep.join(result)
+
+
+def load_ranges(ranges: str, ranges_sep=',', start_end_sep='-'):
+    result = []
+    if len(ranges) > 0:
+        for i in ranges.split(ranges_sep):
+            if start_end_sep in i:
+                start, end = i.split(start_end_sep)
+                result += list(range(int(start), int(end) + 1))
+            else:
+                result.append(int(i))
+    return result
+
+
+def add_to_ranges(ranges: str, num: int, ranges_sep=',', start_end_sep='-'):
+    if len(ranges) > 0:
+        parts = ranges.rsplit(ranges_sep, 1)
+        last = parts[-1]
+        if start_end_sep in last:
+            start, end = last.split(start_end_sep)
+        else:
+            start = end = last
+        if num - int(end) > 1:
+            parts.append(str(num))
+        else:
+            parts[-1] = f'{start}{start_end_sep}{num}'
+        return ranges_sep.join(parts)
+    return str(num)

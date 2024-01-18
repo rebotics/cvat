@@ -72,3 +72,19 @@ class ImportResponseSerializer(_BaseImportSerializer):
     images = serializers.ListSerializer(child=_ImportResponseImageSerializer(),
                                         allow_null=True, default=None)
     status = RqStatusSerializer(allow_null=True, default=None)
+
+
+class ExportSerializer():
+    task_ids = serializers.ListSerializer(child=serializers.IntegerField(), allow_empty=False)
+    start_frame = serializers.IntegerField(default=0)
+    retailer_host = serializers.CharField(max_length=200)
+    retailer_token = serializers.CharField(max_length=40)
+    store_id = serializers.IntegerField()
+
+
+class ExportResponseSerializer():
+    status = serializers.CharField(max_length=20)
+    scan_ids = serializers.ListSerializer(child=serializers.IntegerField)
+    last_task_id = serializers.IntegerField(allow_null=True, default=None)
+    last_frame = serializers.IntegerField(allow_null=True, default=None)
+    message = serializers.CharField(max_length=2000)

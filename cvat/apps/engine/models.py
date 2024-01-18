@@ -549,6 +549,10 @@ class S3File(models.Model):
         default_permissions = ()
         unique_together = ('data', 'file')
 
+    @property
+    def name(self):
+        return os.path.basename(self.file.name)
+
 
 class Segment(models.Model):
     task = models.ForeignKey(Task, on_delete=models.CASCADE)
