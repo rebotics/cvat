@@ -6,7 +6,7 @@ from cvat.apps.organizations.models import Organization
 from cvat.apps.engine.serializers import RqStatusSerializer
 
 
-class _BaseImportSerializer(serializers.Serializer):
+class _BaseIESerializer(serializers.Serializer):
 
     def create(self, validated_data):
         raise NotImplementedError('Creating export data is not allowed')
@@ -15,7 +15,7 @@ class _BaseImportSerializer(serializers.Serializer):
         raise NotImplementedError('Updating export data is not allowed')
 
 
-class _ImportAnnotationSerializer(_BaseImportSerializer):
+class _ImportAnnotationSerializer(_BaseIESerializer):
     lowerx = serializers.FloatField()
     lowery = serializers.FloatField()
     upperx = serializers.FloatField()
@@ -26,7 +26,7 @@ class _ImportAnnotationSerializer(_BaseImportSerializer):
     upc = serializers.CharField(max_length=128, allow_blank=True, allow_null=True, default=None)
 
 
-class _ImportPriceTagSerializer(_BaseImportSerializer):
+class _ImportPriceTagSerializer(_BaseIESerializer):
     lowerx = serializers.FloatField(allow_null=True, default=None)
     lowery = serializers.FloatField(allow_null=True, default=None)
     upperx = serializers.FloatField(allow_null=True, default=None)
@@ -37,7 +37,7 @@ class _ImportPriceTagSerializer(_BaseImportSerializer):
     upc = serializers.CharField(max_length=128, allow_blank=True, allow_null=True, default=None)
 
 
-class _ImportImageSerializer(_BaseImportSerializer):
+class _ImportImageSerializer(_BaseIESerializer):
     items = serializers.ListSerializer(child=_ImportAnnotationSerializer())
     image = serializers.URLField(allow_null=True, default=None)
     planogram_title = serializers.CharField(allow_null=True, default=None)
@@ -46,7 +46,7 @@ class _ImportImageSerializer(_BaseImportSerializer):
                                             default=None, allow_null=True)
 
 
-class ImportSerializer(_BaseImportSerializer):
+class ImportSerializer(_BaseIESerializer):
     image_quality = serializers.IntegerField(min_value=0, max_value=100, default=70)
     segment_size = serializers.IntegerField(min_value=0, default=0)
     workspace = serializers.CharField(max_length=16, allow_null=True, default=settings.IMPORT_WORKSPACE,
@@ -61,12 +61,12 @@ class ImportSerializer(_BaseImportSerializer):
         raise ValidationError(f'Workspace "{value}" does not exist!')
 
 
-class _ImportResponseImageSerializer(_BaseImportSerializer):
+class _ImportResponseImageSerializer(_BaseIESerializer):
     id = serializers.IntegerField()
     image = serializers.URLField()
 
 
-class ImportResponseSerializer(_BaseImportSerializer):
+class ImportResponseSerializer(_BaseIESerializer):
     task_id = serializers.IntegerField(allow_null=True, default=None)
     preview = serializers.URLField(allow_null=True, default=None)
     images = serializers.ListSerializer(child=_ImportResponseImageSerializer(),
@@ -74,7 +74,7 @@ class ImportResponseSerializer(_BaseImportSerializer):
     status = RqStatusSerializer(allow_null=True, default=None)
 
 
-class ExportSerializer():
+class ExportSerializer(_BaseIESerializer):
     task_ids = serializers.ListSerializer(child=serializers.IntegerField(), allow_empty=False)
     start_frame = serializers.IntegerField(default=0)
     retailer_host = serializers.CharField(max_length=200)
@@ -82,9 +82,9 @@ class ExportSerializer():
     store_id = serializers.IntegerField()
 
 
-class ExportResponseSerializer():
+class ExportResponseSerializer(_BaseIESerializer):
     status = serializers.CharField(max_length=20)
-    scan_ids = serializers.ListSerializer(child=serializers.IntegerField)
+    scan_ids = serializers.ListSerializer(child=serializers.IntegerField())
     last_task_id = serializers.IntegerField(allow_null=True, default=None)
     last_frame = serializers.IntegerField(allow_null=True, default=None)
-    message = serializers.CharField(max_length=2000)
+    message = serializers.CharField(max_length=3000, allow_blank=True)

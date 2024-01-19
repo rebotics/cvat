@@ -13,6 +13,7 @@ from cvat.rebotics.utils import save_ranges, load_ranges, add_to_ranges
 from cvat.apps.engine.media_extractors import sort
 from cvat.apps.engine.task import retry
 from cvat.apps.engine.log import slogger
+from io import BytesIO
 
 META_LAST_TASK_ID = 'last_task_id'
 META_LAST_FRAME = 'last_frame'
@@ -44,6 +45,7 @@ def _start_rq(task_ids, start_frame, retailer_host, retailer_token, store_id):
     tasks = Task.objects.filter(pk__in=task_ids).order_by('pk')\
         .select_related('data').prefetch_related('data__s3_files')
     rq_job: Job = rq.get_current_job()
+    slogger.glob.info(f'Starting export {task_ids} to {retailer_host}, rq job: {rq_job.id}')
 
     retailer = RetailerProvider(retailer_host, token=retailer_token)
     scan_ids = []
@@ -52,21 +54,30 @@ def _start_rq(task_ids, start_frame, retailer_host, retailer_token, store_id):
     for task in tasks:
         frame = start_frame
         rq_job.meta[META_LAST_TASK_ID] = task.pk
+
         for file in _sorted_files(task, start_frame):
+            slogger.glob.info(f'{task.pk} {frame} {file.name}')
+
             result = retailer.processing_upload_request(file.name)
             file_id = result['id']
             s3_dest = result['destination']
-            retry(requests.post, kwargs={
-                'url': s3_dest['url'],
-                'data': s3_dest['fields'],
-                'files': {'file': file.file},
-            }, times=3, delay=10, factor=2)
+
+            with BytesIO(file.file.read()) as f:
+                retry(requests.post, kwargs={
+                    'url': s3_dest['url'],
+                    'data': s3_dest['fields'],
+                    'files': {'file': f},
+                }, times=3, delay=10, factor=2)
+
             retailer.notify_processing_upload_finished(file_id)
             result = retailer.create_processing_action(store_id, files=[file_id])
+
             scan_ids.append(result['id'])
+
             rq_job.meta[META_LAST_FRAME] = frame
             rq_job.meta[META_SCAN_IDS] = add_to_ranges(rq_job.meta[META_SCAN_IDS], result['id'])
             rq_job.save_meta()
+
             frame += 1
 
         start_frame = 0

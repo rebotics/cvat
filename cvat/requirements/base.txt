@@ -50,3 +50,5 @@ natsort==8.0.0
 mistune>=2.0.1 # not directly required, pinned by Snyk to avoid a vulnerability
 dnspython==2.2.0
 protobuf==3.20.3
+rebotics_sdk==0.28.5
+requests-toolbelt==1.0.0

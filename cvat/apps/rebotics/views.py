@@ -2,6 +2,7 @@ from rest_framework.viewsets import GenericViewSet
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.decorators import action
 
 from drf_spectacular.utils import extend_schema, extend_schema_view
 
@@ -72,14 +73,12 @@ class RetailerExportViewSet(GenericViewSet):
     def create(self, request, *args, **kwargs):
         serializer = ExportSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        rq_id = export_api.start(serializer.data, request.user)
-        serializer = ExportResponseSerializer({'rq_id': rq_id})
-        serializer.is_valid(raise_exception=True)
-        return Response(serializer.data, status=status.HTTP_202_ACCEPTED)
+        rq_id = export_api.start(**serializer.data)
+        return Response({'rq_id': rq_id}, status=status.HTTP_202_ACCEPTED)
 
-    def retrieve(self):
-        rq_id = self.kwargs.get('pk')
-        rq_data = export_api.check(rq_id)
+    @action(methods=['GET'], detail=False, url_path=r'(?P<retailer_name>\w+)/(?P<export_hash>\w+)')
+    def check_status(self, request, *args, **kwargs):
+        rq_data = export_api.check(self.request.path)
         if rq_data is None:
             raise Http404
         serializer = ExportResponseSerializer(data=rq_data)
