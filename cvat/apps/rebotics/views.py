@@ -84,7 +84,7 @@ class RetailerImportViewSet(GenericViewSet):
     ),
 )
 class RetailerExportViewSet(GenericViewSet):
-    @action(methods=['POST'], detail=False, url_path=r'^auth/?$')
+    @action(methods=['POST'], detail=False, url_path=r'auth/?$')
     def retailer_auth(self, request, *args, **kwargs):
         serializer = ExportAuthSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -101,7 +101,7 @@ class RetailerExportViewSet(GenericViewSet):
         serializer.is_valid(raise_exception=True)
         return Response(serializer.validated_data, status=status.HTTP_202_ACCEPTED)
 
-    @action(methods=['GET'], detail=False, url_path=r'^(?P<retailer_name>\w+)/(?P<export_hash>\w+)/?$')
+    @action(methods=['GET'], detail=False, url_path=r'(?P<retailer_name>\w+)/(?P<export_hash>\w+)/?$')
     def check_status(self, request, *args, **kwargs):
         rq_data = export_api.check(request.path)
         if rq_data is None:
