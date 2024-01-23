@@ -13,7 +13,8 @@ from django.urls import resolve, Resolver404
 from django.views.decorators.common import no_append_slash
 
 from .authentication import RetailerAuthentication
-from .serializers import ImportSerializer, ImportResponseSerializer, ExportSerializer, ExportResponseSerializer
+from .serializers import ImportSerializer, ImportResponseSerializer, ExportSerializer, \
+    ExportResponseSerializer, ExportAuthSerializer, ExportAuthResponseSerializer, ExportCheckSerializer
 from cvat.apps.rebotics.tasks import retailer_import as import_api
 from cvat.apps.rebotics.tasks import retailer_export as export_api
 
@@ -25,12 +26,14 @@ from cvat.apps.rebotics.tasks import retailer_export as export_api
         request=ImportSerializer,
         responses={
             '202': ImportResponseSerializer,
-        }),
+        },
+    ),
     retrieve=extend_schema(
         summary='Check import status and progress. Returns images\' description if import is finished.',
         responses={
             '200': ImportResponseSerializer,
-        }),
+        },
+    ),
 )
 class RetailerImportViewSet(GenericViewSet):
     authentication_classes = [RetailerAuthentication, ]
@@ -62,28 +65,48 @@ class RetailerImportViewSet(GenericViewSet):
         request=ExportSerializer,
         responses={
             '202': ExportResponseSerializer,
-        }),
+        }
+    ),
+    auth=extend_schema(
+        summary='Provide username and password for CVAT to obtain token from retailer instance. '
+                'Username and password are not saved anywhere. Token is saved for 90 days. '
+                'Returns detected retailer name.',
+        request=ExportAuthSerializer,
+        responses={
+            '200': ExportAuthResponseSerializer,
+        },
+    ),
     retrieve=extend_schema(
         summary='Check export status and progress. Returns scan ids once export is finished.',
         responses={
-            '200': ExportResponseSerializer,
-        }),
+            '200': ExportCheckSerializer,
+        }
+    ),
 )
 class RetailerExportViewSet(GenericViewSet):
+    @action(methods=['POST'], detail=False, url_path=r'^auth/?$')
+    def retailer_auth(self, request, *args, **kwargs):
+        serializer = ExportAuthSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        retailer_name = export_api.auth(user=request.user, **serializer.validated_data)
+        return Response({'retailer_name': retailer_name})
+
     def create(self, request, *args, **kwargs):
         serializer = ExportSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        rq_id = export_api.start(**serializer.data)
-        return Response({'rq_id': rq_id}, status=status.HTTP_202_ACCEPTED)
+        rq_id = export_api.start(user=request.user, **serializer.validated_data)
+        serializer = ExportResponseSerializer(data={'rq_id': rq_id})
+        serializer.is_valid(raise_exception=True)
+        return Response(serializer.validated_data, status=status.HTTP_202_ACCEPTED)
 
-    @action(methods=['GET'], detail=False, url_path=r'(?P<retailer_name>\w+)/(?P<export_hash>\w+)')
+    @action(methods=['GET'], detail=False, url_path=r'^(?P<retailer_name>\w+)/(?P<export_hash>\w+)/?$')
     def check_status(self, request, *args, **kwargs):
-        rq_data = export_api.check(self.request.path)
+        rq_data = export_api.check(request.path)
         if rq_data is None:
             raise Http404
-        serializer = ExportResponseSerializer(data=rq_data)
+        serializer = ExportCheckSerializer(data=rq_data)
         serializer.is_valid(raise_exception=True)
-        return Response(serializer.data)
+        return Response(serializer.validated_data)
 
 
 @no_append_slash

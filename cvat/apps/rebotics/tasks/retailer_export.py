@@ -1,5 +1,6 @@
 import hashlib
 from typing import List
+from io import BytesIO
 
 import rq
 import requests
@@ -13,7 +14,7 @@ from cvat.rebotics.utils import save_ranges, load_ranges, add_to_ranges
 from cvat.apps.engine.media_extractors import sort
 from cvat.apps.engine.task import retry
 from cvat.apps.engine.log import slogger
-from io import BytesIO
+from cvat.rebotics.cache import default_cache
 
 META_LAST_TASK_ID = 'last_task_id'
 META_LAST_FRAME = 'last_frame'
@@ -41,13 +42,19 @@ def _task_hash(task_ids):
 
 
 @transaction.atomic
-def _start_rq(task_ids, start_frame, retailer_host, retailer_token, store_id):
-    tasks = Task.objects.filter(pk__in=task_ids).order_by('pk')\
-        .select_related('data').prefetch_related('data__s3_files')
+def _start_rq(task_ids, start_frame, retailer_name, store_id, username):
     rq_job: Job = rq.get_current_job()
-    slogger.glob.info(f'Starting export {task_ids} to {retailer_host}, rq job: {rq_job.id}')
+    slogger.glob.info(f'Starting export {task_ids} to {retailer_name}, rq job: {rq_job.id}')
 
-    retailer = RetailerProvider(retailer_host, token=retailer_token)
+    retailer_auth = default_cache.get(f'{retailer_name}_{username}')
+    if retailer_auth is None:
+        raise RetailerExportError('Auth credentials are not found. '
+                                  'Please, authenticate before exporting.')
+
+    retailer = RetailerProvider(retailer_auth['host'], token=retailer_auth['token'])
+    tasks = Task.objects.filter(pk__in=task_ids).order_by('pk') \
+        .select_related('data').prefetch_related('data__s3_files')
+
     scan_ids = []
     rq_job.meta[META_SCAN_IDS] = save_ranges(scan_ids)
 
@@ -85,18 +92,30 @@ def _start_rq(task_ids, start_frame, retailer_host, retailer_token, store_id):
     return scan_ids
 
 
-def start(task_ids, start_frame, retailer_host, retailer_token, store_id):
+def start(task_ids, start_frame, retailer_name, store_id, user):
     queue = django_rq.get_queue('default')
-    rq_id = f'/api/retailer_export/{_retailer_name(retailer_host)}/{_task_hash(task_ids)}'
+    rq_id = f'/api/retailer_export/{retailer_name}/{_task_hash(task_ids)}'
     job: Job = queue.fetch_job(rq_id)
 
     if job is None or job.is_finished or job.is_failed:
         queue.enqueue_call(_start_rq, args=(
-            task_ids, start_frame, retailer_host, retailer_token, store_id
+            task_ids, start_frame, retailer_name, store_id, user.username
         ), job_id=rq_id)
         return rq_id
 
-    raise RetailerExportError(f'Export job to {retailer_host} for {task_ids} already exists.')
+    raise RetailerExportError(f'Export job to {retailer_name} for {task_ids} already exists.')
+
+
+def auth(retailer_host, username, password, user, verification_code=None):
+    retailer = RetailerProvider(host=retailer_host)
+    kwargs = {}
+    if verification_code is not None:
+        kwargs['verification_code'] = verification_code
+    token = retailer.token_auth(username, password, **kwargs)['token']
+    retailer_name = _retailer_name(retailer_host)
+    default_cache.set(f'{user.username}_{retailer_name}', {'token': token, 'host': retailer_host},
+                      expire=60*60*24*90)  # 90 days in seconds
+    return retailer_name
 
 
 def check(rq_id):
