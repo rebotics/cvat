@@ -34,7 +34,7 @@ def _sorted_files(task: Task, start_frame: int = 0) -> List[S3File]:
 
 
 def _retailer_name(retailer_host: str):
-    return retailer_host.split('//', 1)[1].split('.', 1)[0]
+    return retailer_host.split('//', 1)[1].split('.', 1)[0][:50]
 
 
 def _task_hash(task_ids):
