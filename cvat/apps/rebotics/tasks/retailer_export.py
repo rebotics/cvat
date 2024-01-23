@@ -42,7 +42,7 @@ def _task_hash(task_ids):
 
 
 @transaction.atomic
-def _start_rq(task_ids, start_frame, retailer_name, store_id, username):
+def _start_rq(task_ids, start_frame, retailer_name, username, store_id=None):
     rq_job: Job = rq.get_current_job()
     slogger.glob.info(f'Starting export {task_ids} to {retailer_name}, rq job: {rq_job.id}')
 
@@ -50,6 +50,13 @@ def _start_rq(task_ids, start_frame, retailer_name, store_id, username):
     if retailer_auth is None:
         raise RetailerExportError('Auth credentials are not found. '
                                   'Please, authenticate before exporting.')
+
+    try:
+        if store_id is None:
+            store_id = retailer_auth['store_id']
+    except KeyError:
+        raise RetailerExportError('Store id is not provided and default store id is not found.'
+                                  'Please, authenticate to set it.')
 
     retailer = RetailerProvider(retailer_auth['host'], token=retailer_auth['token'])
     tasks = Task.objects.filter(pk__in=task_ids).order_by('pk') \
@@ -92,28 +99,29 @@ def _start_rq(task_ids, start_frame, retailer_name, store_id, username):
     return scan_ids
 
 
-def start(task_ids, start_frame, retailer_name, store_id, user):
+def start(task_ids, start_frame, retailer_name, user, store_id=None):
     queue = django_rq.get_queue('default')
     rq_id = f'/api/retailer_export/{retailer_name}/{_task_hash(task_ids)}'
     job: Job = queue.fetch_job(rq_id)
 
     if job is None or job.is_finished or job.is_failed:
         queue.enqueue_call(_start_rq, args=(
-            task_ids, start_frame, retailer_name, store_id, user.username
+            task_ids, start_frame, retailer_name, user.username, store_id,
         ), job_id=rq_id)
         return rq_id
 
     raise RetailerExportError(f'Export job to {retailer_name} for {task_ids} already exists.')
 
 
-def auth(retailer_host, username, password, user, verification_code=None):
+def auth(retailer_host, username, password, user, verification_code=None, default_store_id=None):
     retailer = RetailerProvider(host=retailer_host)
     kwargs = {}
     if verification_code is not None:
         kwargs['verification_code'] = verification_code
     token = retailer.token_auth(username, password, **kwargs)['token']
     retailer_name = _retailer_name(retailer_host)
-    default_cache.set(f'{user.username}_{retailer_name}', {'token': token, 'host': retailer_host},
+    default_cache.set(f'{user.username}_{retailer_name}',
+                      {'token': token, 'host': retailer_host, 'store_id': default_store_id},
                       expire=60*60*24*90)  # 90 days in seconds
     return retailer_name
 

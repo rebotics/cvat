@@ -78,7 +78,7 @@ class ExportSerializer(_BaseIESerializer):
     task_ids = serializers.ListSerializer(child=serializers.IntegerField(), allow_empty=False)
     start_frame = serializers.IntegerField(default=0)
     retailer_name = serializers.CharField(max_length=50)
-    store_id = serializers.IntegerField()
+    store_id = serializers.IntegerField(allow_null=True, default=None)
 
 
 class ExportResponseSerializer(_BaseIESerializer):
@@ -90,6 +90,7 @@ class ExportAuthSerializer(_BaseIESerializer):
     username = serializers.CharField(max_length=150)
     password = serializers.CharField(max_length=128)
     verification_code = serializers.CharField(max_length=20, allow_null=True, default=None)
+    default_store_id = serializers.IntegerField(allow_null=True, default=None)
 
 
 class ExportAuthResponseSerializer(_BaseIESerializer):

@@ -89,7 +89,9 @@ class RetailerExportViewSet(GenericViewSet):
         serializer = ExportAuthSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         retailer_name = export_api.auth(user=request.user, **serializer.validated_data)
-        return Response({'retailer_name': retailer_name})
+        serializer = ExportAuthResponseSerializer(data={'retailer_name': retailer_name})
+        serializer.is_valid(raise_exception=True)
+        return Response(serializer.validated_data)
 
     def create(self, request, *args, **kwargs):
         serializer = ExportSerializer(data=request.data)
