@@ -101,7 +101,7 @@ class RetailerExportViewSet(GenericViewSet):
         serializer.is_valid(raise_exception=True)
         return Response(serializer.validated_data, status=status.HTTP_202_ACCEPTED)
 
-    @action(methods=['GET'], detail=False, url_path=r'(?P<retailer_name>\w+)/(?P<export_hash>\w+)/?$')
+    @action(methods=['GET'], detail=False, url_path=r'(?P<rq_id>\w+_\w+_\d+)/?$')
     def check_status(self, request, *args, **kwargs):
         rq_data = export_api.check(request.path)
         if rq_data is None:
