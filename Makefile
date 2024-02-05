@@ -19,11 +19,17 @@ up:
 up-analytics:
 	docker-compose -f rebotics/docker-compose.yml -f rebotics/components/analytics/docker-compose.analytics.yml up ${SERVICES} logstash
 
+up-serverless:
+	docker-compose -f rebotics/docker-compose.yml -f rebotics/components/serverless/docker-compose.serverless.yml up ${SERVICES} nuclio
+
 down:
 	docker-compose -f rebotics/docker-compose.yml down
 
 down-analytics:
 	docker-compose -f rebotics/docker-compose.yml -f rebotics/components/analytics/docker-compose.analytics.yml down
+
+down-serverless:
+	docker-compose -f rebotics/docker-compose.yml -f rebotics/components/serverless/docker-compose.serverless.yml down
 
 shell:
 	docker exec -it -u root reb_cvat bash -i

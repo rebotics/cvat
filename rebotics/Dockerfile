@@ -47,6 +47,7 @@ RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
 RUN python3 -m pip install --no-cache-dir -U pip==22.0.2 setuptools==60.6.0 wheel==0.37.1
 COPY cvat/requirements/ /tmp/requirements/
+RUN python3 -m pip install --no-cache-dir tensorflow==2.8.1  # heavy
 RUN DATUMARO_HEADLESS=1 python3 -m pip install --no-cache-dir -r /tmp/requirements/${DJANGO_CONFIGURATION}.txt
 
 # Install rebotics requirements
