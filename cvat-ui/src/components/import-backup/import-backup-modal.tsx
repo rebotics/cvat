@@ -1,4 +1,5 @@
 // Copyright (C) 2022 CVAT.ai Corporation
+// Copyright (C) 2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
@@ -47,26 +48,37 @@ function ImportBackupModal(): JSX.Element {
     });
 
     const uploadLocalFile = (): JSX.Element => (
-        <Upload.Dragger
-            listType='text'
-            fileList={file ? [file] : ([] as any[])}
-            beforeUpload={(_file: RcFile): boolean => {
-                if (!['application/zip', 'application/x-zip-compressed'].includes(_file.type)) {
-                    message.error('Only ZIP archive is supported');
-                } else {
-                    setFile(_file);
+        <Form.Item
+            getValueFromEvent={(e) => {
+                if (Array.isArray(e)) {
+                    return e;
                 }
-                return false;
+                return e?.fileList[0];
             }}
-            onRemove={() => {
-                setFile(null);
-            }}
+            name='dragger'
+            rules={[{ required: true, message: 'The file is required' }]}
         >
-            <p className='ant-upload-drag-icon'>
-                <InboxOutlined />
-            </p>
-            <p className='ant-upload-text'>Click or drag file to this area</p>
-        </Upload.Dragger>
+            <Upload.Dragger
+                listType='text'
+                fileList={file ? [file] : ([] as any[])}
+                beforeUpload={(_file: RcFile): boolean => {
+                    if (!['application/zip', 'application/x-zip-compressed'].includes(_file.type)) {
+                        message.error('Only ZIP archive is supported');
+                    } else {
+                        setFile(_file);
+                    }
+                    return false;
+                }}
+                onRemove={() => {
+                    setFile(null);
+                }}
+            >
+                <p className='ant-upload-drag-icon'>
+                    <InboxOutlined />
+                </p>
+                <p className='ant-upload-text'>Click or drag file to this area</p>
+            </Upload.Dragger>
+        </Form.Item>
     );
 
     const validateFileName = (_: RuleObject, value: string): Promise<void> => {
@@ -84,7 +96,7 @@ function ImportBackupModal(): JSX.Element {
         <Form.Item
             label={<Text strong>File name</Text>}
             name='fileName'
-            rules={[{ validator: validateFileName }]}
+            rules={[{ validator: validateFileName }, { required: true, message: 'Please, specify a name' }]}
         >
             <Input
                 placeholder='Backup file name'
@@ -127,45 +139,40 @@ function ImportBackupModal(): JSX.Element {
     );
 
     return (
-        <>
-            <Modal
-                title={(
-                    <Text strong>
-                        Create
-                        {instanceType}
-                        {' '}
-                        from backup
-                    </Text>
-                )}
-                visible={modalVisible}
-                onCancel={closeModal}
-                onOk={() => form.submit()}
-                className='cvat-modal-import-backup'
+        <Modal
+            title={(
+                <Text strong>
+                    {`Create ${instanceType} from backup`}
+                </Text>
+            )}
+            visible={modalVisible}
+            onCancel={closeModal}
+            onOk={() => form.submit()}
+            className='cvat-modal-import-backup'
+        >
+            <Form
+                name={`Create ${instanceType} from backup file`}
+                form={form}
+                onFinish={handleImport}
+                layout='vertical'
+                initialValues={initialValues}
             >
-                <Form
-                    name={`Create ${instanceType} from backup file`}
-                    form={form}
-                    onFinish={handleImport}
-                    layout='vertical'
-                    initialValues={initialValues}
-                >
-                    <SourceStorageField
-                        instanceId={null}
-                        storageDescription='Specify source storage with backup'
-                        locationValue={selectedSourceStorage.location}
-                        onChangeStorage={(value: StorageData) => setSelectedSourceStorage(new Storage(value))}
-                        onChangeLocationValue={(value: StorageLocation) => {
-                            setSelectedSourceStorage({
-                                location: value,
-                            });
-                        }}
+                <SourceStorageField
+                    instanceId={null}
+                    storageDescription='Specify source storage with backup'
+                    locationValue={selectedSourceStorage.location}
+                    onChangeStorage={(value: StorageData) => setSelectedSourceStorage(new Storage(value))}
+                    onChangeLocationValue={(value: StorageLocation) => {
+                        setSelectedSourceStorage({
+                            location: value,
+                        });
+                    }}
 
-                    />
-                    {selectedSourceStorage?.location === StorageLocation.CLOUD_STORAGE && renderCustomName()}
-                    {selectedSourceStorage?.location === StorageLocation.LOCAL && uploadLocalFile()}
-                </Form>
-            </Modal>
-        </>
+                />
+                {selectedSourceStorage?.location === StorageLocation.CLOUD_STORAGE && renderCustomName()}
+                {selectedSourceStorage?.location === StorageLocation.LOCAL && uploadLocalFile()}
+            </Form>
+        </Modal>
     );
 }
 

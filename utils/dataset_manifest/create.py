@@ -1,14 +1,19 @@
+#!/usr/bin/env python3
+
 # Copyright (C) 2021-2022 Intel Corporation
+# Copyright (C) 2022-2023 CVAT.ai Corporation
 #
 # SPDX-License-Identifier: MIT
+
 import argparse
 import os
 import sys
 import re
 from glob import glob
+
 from tqdm import tqdm
 
-from utils import detect_related_images, is_image, is_video
+from utils import detect_related_images, is_image, is_video, SortingMethod
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -17,8 +22,8 @@ def get_args():
              'if by default the video does not meet the requirements and a manifest file is not prepared')
     parser.add_argument('--output-dir',type=str, help='Directory where the manifest file will be saved',
         default=os.getcwd())
-    parser.add_argument('--sorting', choices=['lexicographical', 'natural', 'predefined', 'random'],
-                        type=str, default='lexicographical')
+    parser.add_argument('--sorting', choices=[v[0] for v in SortingMethod.choices()],
+        type=str, default=SortingMethod.LEXICOGRAPHICAL.value)
     parser.add_argument('source', type=str, help='Source paths')
     return parser.parse_args()
 
@@ -89,6 +94,7 @@ def main():
             sys.exit(str(ex))
 
     print('The manifest file has been prepared')
+
 if __name__ == "__main__":
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.append(base_dir)

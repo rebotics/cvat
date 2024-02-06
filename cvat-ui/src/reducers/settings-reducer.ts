@@ -1,4 +1,5 @@
 // Copyright (C) 2020-2022 Intel Corporation
+// Copyright (C) 2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
@@ -8,10 +9,10 @@ import { BoundariesActionTypes } from 'actions/boundaries-actions';
 import { AuthActionTypes } from 'actions/auth-actions';
 import { SettingsActionTypes } from 'actions/settings-actions';
 import { AnnotationActionTypes } from 'actions/annotation-actions';
-
 import {
-    SettingsState, GridColor, FrameSpeed, ColorBy, DimensionType,
-} from '.';
+    SettingsState, GridColor, FrameSpeed, ColorBy,
+} from 'reducers';
+import { clampOpacity } from 'utils/clamp-opacity';
 
 const defaultState: SettingsState = {
     shapes: {
@@ -22,6 +23,7 @@ const defaultState: SettingsState = {
         outlineColor: '#000000',
         showBitmap: false,
         showProjections: false,
+        showGroundTruth: false,
         lineWidth: 1,
     },
     workspace: {
@@ -59,6 +61,7 @@ const defaultState: SettingsState = {
         contrastLevel: 100,
         saturationLevel: 100,
     },
+    imageFilters: [],
     showDialog: false,
 };
 
@@ -115,6 +118,15 @@ export default (state = defaultState, action: AnyAction): SettingsState => {
                 shapes: {
                     ...state.shapes,
                     colorBy: action.payload.colorBy,
+                },
+            };
+        }
+        case SettingsActionTypes.CHANGE_SHOW_GROUND_TRUTH: {
+            return {
+                ...state,
+                shapes: {
+                    ...state.shapes,
+                    showGroundTruth: action.payload.showGroundTruth,
                 },
             };
         }
@@ -366,7 +378,7 @@ export default (state = defaultState, action: AnyAction): SettingsState => {
         case SettingsActionTypes.SWITCH_SETTINGS_DIALOG: {
             return {
                 ...state,
-                showDialog: typeof action.payload.show === 'undefined' ? !state.showDialog : action.payload.show,
+                showDialog: action.payload.visible,
             };
         }
         case SettingsActionTypes.SET_SETTINGS: {
@@ -393,25 +405,82 @@ export default (state = defaultState, action: AnyAction): SettingsState => {
                 },
             };
         }
+        case SettingsActionTypes.ENABLE_IMAGE_FILTER: {
+            const { filter, options } = action.payload;
+            const { alias } = filter;
+            const filters = [...state.imageFilters];
+            const index = filters.findIndex((imageFilter) => imageFilter.alias === alias);
+            if (options && index !== -1) {
+                const enabledFilter = filters[index];
+                enabledFilter.modifier.currentProcessedImage = null;
+                enabledFilter.modifier.configure(options);
+                return {
+                    ...state,
+                    imageFilters: filters,
+                };
+            }
+            return {
+                ...state,
+                imageFilters: [
+                    ...state.imageFilters,
+                    action.payload.filter,
+                ],
+            };
+        }
+        case SettingsActionTypes.DISABLE_IMAGE_FILTER: {
+            const { filterAlias } = action.payload;
+            const filters = [...state.imageFilters];
+            const index = filters.findIndex((imageFilter) => imageFilter.alias === filterAlias);
+            if (index !== -1) {
+                filters.splice(index, 1);
+            }
+            filters.forEach((imageFilter) => {
+                imageFilter.modifier.currentProcessedImage = null;
+            });
+            return {
+                ...state,
+                imageFilters: filters,
+            };
+        }
+        case SettingsActionTypes.RESET_IMAGE_FILTERS: {
+            return {
+                ...state,
+                imageFilters: [],
+            };
+        }
+        case AnnotationActionTypes.FETCH_ANNOTATIONS_SUCCESS:
+        case AnnotationActionTypes.CHANGE_FRAME_SUCCESS: {
+            const { states } = action.payload;
+            const { shapes } = state;
+            const [clampedOpacity, clampedSelectedOpacity] = clampOpacity(states, shapes);
+            return {
+                ...state,
+                shapes: {
+                    ...state.shapes,
+                    opacity: clampedOpacity,
+                    selectedOpacity: clampedSelectedOpacity,
+                },
+            };
+        }
         case BoundariesActionTypes.RESET_AFTER_ERROR:
         case AnnotationActionTypes.GET_JOB_SUCCESS: {
-            const { job } = action.payload;
+            const { job, states } = action.payload;
+            const { shapes } = state;
+            const filters = [...state.imageFilters];
+            filters.forEach((imageFilter) => {
+                imageFilter.modifier.currentProcessedImage = null;
+            });
+
+            const [clampedOpacity, clampedSelectedOpacity] = clampOpacity(states, shapes, job);
 
             return {
                 ...state,
-                player: {
-                    ...state.player,
-                    resetZoom: job && job.mode === 'annotation',
-                },
                 shapes: {
                     ...defaultState.shapes,
-                    ...(job.dimension === DimensionType.DIM_3D ?
-                        {
-                            opacity: 40,
-                            selectedOpacity: 60,
-                        } :
-                        {}),
+                    opacity: clampedOpacity,
+                    selectedOpacity: clampedSelectedOpacity,
                 },
+                imageFilters: filters,
             };
         }
         case AnnotationActionTypes.INTERACT_WITH_CANVAS: {
@@ -423,6 +492,15 @@ export default (state = defaultState, action: AnyAction): SettingsState => {
                         buttonVisible: true,
                         algorithmsLocked: false,
                     },
+                },
+            };
+        }
+        case AnnotationActionTypes.CHANGE_WORKSPACE: {
+            return {
+                ...state,
+                shapes: {
+                    ...state.shapes,
+                    showGroundTruth: false,
                 },
             };
         }

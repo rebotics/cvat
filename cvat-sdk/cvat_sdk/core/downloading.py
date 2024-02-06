@@ -5,13 +5,13 @@
 
 from __future__ import annotations
 
-import os
-import os.path as osp
 from contextlib import closing
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from cvat_sdk.api_client.api_client import Endpoint
-from cvat_sdk.core.progress import ProgressReporter
+from cvat_sdk.core.progress import NullProgressReporter, ProgressReporter
+from cvat_sdk.core.utils import atomic_writer
 
 if TYPE_CHECKING:
     from cvat_sdk.core.client import Client
@@ -28,7 +28,7 @@ class Downloader:
     def download_file(
         self,
         url: str,
-        output_path: str,
+        output_path: Path,
         *,
         timeout: int = 60,
         pbar: Optional[ProgressReporter] = None,
@@ -39,11 +39,10 @@ class Downloader:
 
         CHUNK_SIZE = 10 * 2**20
 
-        assert not osp.exists(output_path)
+        assert not output_path.exists()
 
-        tmp_path = output_path + ".tmp"
-        if osp.exists(tmp_path):
-            raise FileExistsError(f"Can't write temporary file '{tmp_path}' - file exists")
+        if pbar is None:
+            pbar = NullProgressReporter()
 
         response = self._client.api_client.rest_client.GET(
             url,
@@ -53,34 +52,25 @@ class Downloader:
         )
         with closing(response):
             try:
-                file_size = int(response.getheader("Content-Length", 0))
+                file_size = int(response.headers.get("Content-Length", 0))
             except ValueError:
                 file_size = None
 
-            try:
-                with open(tmp_path, "wb") as fd:
-                    if pbar is not None:
-                        pbar.start(file_size, desc="Downloading")
+            with atomic_writer(output_path, "wb") as fd, pbar.task(
+                total=file_size, desc="Downloading", unit_scale=True, unit="B", unit_divisor=1024
+            ):
+                while True:
+                    chunk = response.read(amt=CHUNK_SIZE, decode_content=False)
+                    if not chunk:
+                        break
 
-                    while True:
-                        chunk = response.read(amt=CHUNK_SIZE, decode_content=False)
-                        if not chunk:
-                            break
-
-                        if pbar is not None:
-                            pbar.advance(len(chunk))
-
-                        fd.write(chunk)
-
-                os.rename(tmp_path, output_path)
-            except:
-                os.unlink(tmp_path)
-                raise
+                    pbar.advance(len(chunk))
+                    fd.write(chunk)
 
     def prepare_and_download_file_from_endpoint(
         self,
         endpoint: Endpoint,
-        filename: str,
+        filename: Path,
         *,
         url_params: Optional[Dict[str, Any]] = None,
         query_params: Optional[Dict[str, Any]] = None,

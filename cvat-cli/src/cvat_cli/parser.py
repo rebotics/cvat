@@ -8,8 +8,11 @@ import getpass
 import json
 import logging
 import os
-from distutils.util import strtobool
+import textwrap
+from pathlib import Path
+from typing import Any, Tuple
 
+from attr.converters import to_bool
 from cvat_sdk.core.proxies.tasks import ResourceType
 
 from .version import VERSION
@@ -37,6 +40,40 @@ def parse_resource_type(s: str) -> ResourceType:
         return ResourceType[s.upper()]
     except KeyError:
         return s
+
+
+def parse_function_parameter(s: str) -> Tuple[str, Any]:
+    key, sep, type_and_value = s.partition("=")
+
+    if not sep:
+        raise argparse.ArgumentTypeError("parameter value not specified")
+
+    type_, sep, value = type_and_value.partition(":")
+
+    if not sep:
+        raise argparse.ArgumentTypeError("parameter type not specified")
+
+    if type_ == "int":
+        value = int(value)
+    elif type_ == "float":
+        value = float(value)
+    elif type_ == "str":
+        pass
+    elif type_ == "bool":
+        value = to_bool(value)
+    else:
+        raise argparse.ArgumentTypeError(f"unsupported parameter type {type_!r}")
+
+    return (key, value)
+
+
+class BuildDictAction(argparse.Action):
+    def __init__(self, option_strings, dest, default=None, **kwargs):
+        super().__init__(option_strings, dest, default=default or {}, **kwargs)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        key, value = values
+        getattr(namespace, self.dest)[key] = value
 
 
 def make_cmdline_parser() -> argparse.ArgumentParser:
@@ -77,6 +114,15 @@ def make_cmdline_parser() -> argparse.ArgumentParser:
         help="port (default: 80 for http and 443 for https connections)",
     )
     parser.add_argument(
+        "--organization",
+        "--org",
+        metavar="SLUG",
+        help="""short name (slug) of the organization
+                to use when listing or creating resources;
+                set to blank string to use the personal workspace
+                (default: list all accessible objects, create in personal workspace)""",
+    )
+    parser.add_argument(
         "--debug",
         action="store_const",
         dest="loglevel",
@@ -90,10 +136,15 @@ def make_cmdline_parser() -> argparse.ArgumentParser:
     #######################################################################
     task_create_parser = task_subparser.add_parser(
         "create",
-        description="""Create a new CVAT task. To create a task, you need
-                    to specify labels using the --labels argument or
-                    attach the task to an existing project using the
-                    --project_id argument.""",
+        description=textwrap.dedent(
+            """\
+            Create a new CVAT task. To create a task, you need
+            to specify labels using the --labels argument or
+            attach the task to an existing project using the
+            --project_id argument.
+        """
+        ),
+        formatter_class=argparse.RawTextHelpFormatter,
     )
     task_create_parser.add_argument("name", type=str, help="name of the task")
     task_create_parser.add_argument(
@@ -122,52 +173,53 @@ def make_cmdline_parser() -> argparse.ArgumentParser:
     task_create_parser.add_argument(
         "--completion_verification_period",
         dest="status_check_period",
-        default=20,
+        default=2,
         type=float,
-        help="""number of seconds to wait until checking
-                if data compression finished (necessary before uploading annotations)""",
+        help=textwrap.dedent(
+            """\
+            number of seconds to wait until checking
+            if data compression finished (necessary before uploading annotations)
+        """
+        ),
     )
     task_create_parser.add_argument(
         "--copy_data",
         default=False,
         action="store_true",
-        help="""set the option to copy the data, only used when resource type is
-                share (default: %(default)s)""",
-    )
-    task_create_parser.add_argument(
-        "--dataset_repository_url",
-        default="",
-        type=str,
-        help=(
-            "git repository to store annotations e.g."
-            " https://github.com/user/repos [annotation/<anno_file_name.zip>]"
+        help=textwrap.dedent(
+            """\
+            set the option to copy the data, only used when resource type is
+            share (default: %(default)s)
+        """
         ),
     )
     task_create_parser.add_argument(
         "--frame_step",
         default=None,
         type=int,
-        help="""set the frame step option in the advanced configuration
-                when uploading image series or videos (default: %(default)s)""",
+        help=textwrap.dedent(
+            """\
+            set the frame step option in the advanced configuration
+            when uploading image series or videos (default: %(default)s)
+        """
+        ),
     )
     task_create_parser.add_argument(
         "--image_quality",
         default=70,
         type=int,
-        help="""set the image quality option in the advanced configuration
-                when creating tasks.(default: %(default)s)""",
+        help=textwrap.dedent(
+            """\
+            set the image quality option in the advanced configuration
+            when creating tasks.(default: %(default)s)
+        """
+        ),
     )
     task_create_parser.add_argument(
         "--labels",
         default="[]",
         type=parse_label_arg,
         help="string or file containing JSON labels specification",
-    )
-    task_create_parser.add_argument(
-        "--lfs",
-        default=False,
-        action="store_true",
-        help="using lfs for dataset repository (default: %(default)s)",
     )
     task_create_parser.add_argument(
         "--project_id", default=None, type=int, help="project ID if project exists"
@@ -200,6 +252,26 @@ def make_cmdline_parser() -> argparse.ArgumentParser:
         "--use_zip_chunks",
         action="store_true",  # automatically sets default=False
         help="""zip chunks before sending them to the server""",
+    )
+    task_create_parser.add_argument(
+        "--cloud_storage_id",
+        default=None,
+        type=int,
+        help="cloud storage ID if you would like to use data from cloud storage",
+    )
+    task_create_parser.add_argument(
+        "--filename_pattern",
+        type=str,
+        help=textwrap.dedent(
+            """\
+            pattern for filtering data from the manifest file for the upload.
+            Only shell-style wildcards are supported:
+            * - matches everything
+            ? - matches any single character
+            [seq] - matches any character in 'seq'
+            [!seq] - matches any character not in seq
+        """
+        ),
     )
 
     #######################################################################
@@ -261,13 +333,13 @@ def make_cmdline_parser() -> argparse.ArgumentParser:
     dump_parser.add_argument(
         "--completion_verification_period",
         dest="status_check_period",
-        default=3,
+        default=2,
         type=float,
         help="number of seconds to wait until checking if dataset building finished",
     )
     dump_parser.add_argument(
         "--with-images",
-        type=strtobool,
+        type=to_bool,
         default=False,
         dest="include_images",
         help="Whether to include images or not (default: %(default)s)",
@@ -298,7 +370,7 @@ def make_cmdline_parser() -> argparse.ArgumentParser:
     export_task_parser.add_argument(
         "--completion_verification_period",
         dest="status_check_period",
-        default=3,
+        default=2,
         type=float,
         help="time interval between checks if archive building has been finished, in seconds",
     )
@@ -311,9 +383,53 @@ def make_cmdline_parser() -> argparse.ArgumentParser:
     import_task_parser.add_argument(
         "--completion_verification_period",
         dest="status_check_period",
-        default=3,
+        default=2,
         type=float,
-        help="time interval between checks if archive proessing was finished, in seconds",
+        help="time interval between checks if archive processing was finished, in seconds",
+    )
+
+    #######################################################################
+    # Auto-annotate
+    #######################################################################
+    auto_annotate_task_parser = task_subparser.add_parser(
+        "auto-annotate",
+        description="Automatically annotate a CVAT task by running a function on the local machine.",
+    )
+    auto_annotate_task_parser.add_argument("task_id", type=int, help="task ID")
+
+    function_group = auto_annotate_task_parser.add_mutually_exclusive_group(required=True)
+
+    function_group.add_argument(
+        "--function-module",
+        metavar="MODULE",
+        help="qualified name of a module to use as the function",
+    )
+
+    function_group.add_argument(
+        "--function-file",
+        metavar="PATH",
+        type=Path,
+        help="path to a Python source file to use as the function",
+    )
+
+    auto_annotate_task_parser.add_argument(
+        "--function-parameter",
+        "-p",
+        metavar="NAME=TYPE:VALUE",
+        type=parse_function_parameter,
+        action=BuildDictAction,
+        dest="function_parameters",
+        help="parameter for the function",
+    )
+
+    auto_annotate_task_parser.add_argument(
+        "--clear-existing", action="store_true", help="Remove existing annotations from the task"
+    )
+
+    auto_annotate_task_parser.add_argument(
+        "--allow-unmatched-labels",
+        action="store_true",
+        help="Allow the function to declare labels not configured in the task",
     )
 
     return parser

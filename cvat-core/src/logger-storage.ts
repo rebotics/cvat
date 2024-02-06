@@ -1,14 +1,13 @@
 // Copyright (C) 2019-2022 Intel Corporation
+// Copyright (C) 2022-2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
-const PluginRegistry = require('./plugins').default;
-const serverProxy = require('./server-proxy').default;
-const logFactory = require('./log');
-const { ArgumentError } = require('./exceptions');
-const { LogType } = require('./enums');
-
-const WORKING_TIME_THRESHOLD = 100000; // ms, 1.66 min
+import PluginRegistry from './plugins';
+import serverProxy from './server-proxy';
+import logFactory, { EventLogger } from './log';
+import { LogType } from './enums';
+import { ArgumentError } from './exceptions';
 
 function sleep(ms): Promise<void> {
     return new Promise((resolve) => {
@@ -16,45 +15,75 @@ function sleep(ms): Promise<void> {
     });
 }
 
+function defaultUpdate(previousLog: EventLogger, currentPayload: any): object {
+    return {
+        ...previousLog.payload,
+        ...currentPayload,
+    };
+}
+
+interface IgnoreRule {
+    lastLog: EventLogger | null;
+    timeThreshold?: number;
+    ignore: (previousLog: EventLogger, currentPayload: any) => boolean;
+    update: (previousLog: EventLogger, currentPayload: any) => object;
+}
+
+type IgnoredRules = LogType.zoomImage | LogType.changeAttribute | LogType.changeFrame;
+
 class LoggerStorage {
+    public clientID: string;
+    public collection: Array<EventLogger>;
+    public ignoreRules: Record<IgnoredRules, IgnoreRule>;
+    public isActiveChecker: (() => boolean) | null;
+    public saving: boolean;
+    public compressedLogs: Array<LogType>;
+
     constructor() {
         this.clientID = Date.now().toString().substr(-6);
-        this.lastLogTime = Date.now();
-        this.workingTime = 0;
         this.collection = [];
-        this.ignoreRules = {}; // by event
         this.isActiveChecker = null;
         this.saving = false;
-
-        this.ignoreRules[LogType.zoomImage] = {
-            lastLog: null,
-            timeThreshold: 1000,
-            ignore(previousLog) {
-                return Date.now() - previousLog.time < this.timeThreshold;
+        this.compressedLogs = [LogType.changeFrame];
+        this.ignoreRules = {
+            [LogType.zoomImage]: {
+                lastLog: null,
+                timeThreshold: 4000,
+                ignore(previousLog: EventLogger): boolean {
+                    return (Date.now() - previousLog.time.getTime()) < this.timeThreshold;
+                },
+                update: defaultUpdate,
             },
-        };
-
-        this.ignoreRules[LogType.changeAttribute] = {
-            lastLog: null,
-            ignore(previousLog, currentPayload) {
-                return (
-                    currentPayload.object_id === previousLog.payload.object_id &&
-                    currentPayload.id === previousLog.payload.id
-                );
+            [LogType.changeAttribute]: {
+                lastLog: null,
+                ignore(previousLog: EventLogger, currentPayload: any): boolean {
+                    return (
+                        currentPayload.object_id === previousLog.payload.object_id &&
+                        currentPayload.id === previousLog.payload.id
+                    );
+                },
+                update: defaultUpdate,
+            },
+            [LogType.changeFrame]: {
+                lastLog: null,
+                ignore(previousLog: EventLogger, currentPayload: any): boolean {
+                    return (
+                        currentPayload.job_id === previousLog.payload.job_id &&
+                        currentPayload.step === previousLog.payload.step
+                    );
+                },
+                update(previousLog: EventLogger, currentPayload: any): object {
+                    return {
+                        ...previousLog.payload,
+                        to: currentPayload.to,
+                        count: previousLog.payload.count + 1,
+                    };
+                },
             },
         };
     }
 
-    updateWorkingTime() {
-        if (!this.isActiveChecker || this.isActiveChecker()) {
-            const lastLogTime = Date.now();
-            const diff = lastLogTime - this.lastLogTime;
-            this.workingTime += diff < WORKING_TIME_THRESHOLD ? diff : 0;
-            this.lastLogTime = lastLogTime;
-        }
-    }
-
-    async configure(isActiveChecker, activityHelper) {
+    public async configure(isActiveChecker, activityHelper): Promise<void> {
         const result = await PluginRegistry.apiWrapper.call(
             this,
             LoggerStorage.prototype.configure,
@@ -64,123 +93,139 @@ class LoggerStorage {
         return result;
     }
 
-    async log(logType, payload = {}, wait = false) {
+    public async log(logType: LogType, payload = {}, wait = false): Promise<EventLogger> {
         const result = await PluginRegistry.apiWrapper.call(this, LoggerStorage.prototype.log, logType, payload, wait);
         return result;
     }
 
-    async save() {
+    public async save(): Promise<void> {
         const result = await PluginRegistry.apiWrapper.call(this, LoggerStorage.prototype.save);
         return result;
     }
 }
 
-LoggerStorage.prototype.configure.implementation = function (isActiveChecker, userActivityCallback) {
-    if (typeof isActiveChecker !== 'function') {
-        throw new ArgumentError('isActiveChecker argument must be callable');
-    }
+Object.defineProperties(LoggerStorage.prototype.configure, {
+    implementation: {
+        writable: false,
+        enumerable: false,
+        value: async function implementation(isActiveChecker: () => boolean, userActivityCallback: Array<any>) {
+            if (typeof isActiveChecker !== 'function') {
+                throw new ArgumentError('isActiveChecker argument must be callable');
+            }
 
-    if (!Array.isArray(userActivityCallback)) {
-        throw new ArgumentError('userActivityCallback argument must be an array');
-    }
+            if (!Array.isArray(userActivityCallback)) {
+                throw new ArgumentError('userActivityCallback argument must be an array');
+            }
 
-    this.isActiveChecker = () => !!isActiveChecker();
-    userActivityCallback.push(this.updateWorkingTime.bind(this));
-};
+            this.isActiveChecker = () => !!isActiveChecker();
+        },
+    },
+});
 
-LoggerStorage.prototype.log.implementation = function (logType, payload, wait) {
-    if (typeof payload !== 'object') {
-        throw new ArgumentError('Payload must be an object');
-    }
+Object.defineProperties(LoggerStorage.prototype.log, {
+    implementation: {
+        writable: false,
+        enumerable: false,
+        value: async function implementation(logType: LogType, payload: any, wait: boolean) {
+            if (typeof payload !== 'object') {
+                throw new ArgumentError('Payload must be an object');
+            }
 
-    if (typeof wait !== 'boolean') {
-        throw new ArgumentError('Payload must be an object');
-    }
+            if (typeof wait !== 'boolean') {
+                throw new ArgumentError('Wait must be boolean');
+            }
 
-    if (logType in this.ignoreRules) {
-        const ignoreRule = this.ignoreRules[logType];
-        const { lastLog } = ignoreRule;
-        if (lastLog && ignoreRule.ignore(lastLog, payload)) {
-            lastLog.payload = {
-                ...lastLog.payload,
-                ...payload,
+            if (!this.compressedLogs.includes(logType)) {
+                this.compressedLogs.forEach((compressedType: LogType) => {
+                    this.ignoreRules[compressedType].lastLog = null;
+                });
+            }
+
+            if (logType in this.ignoreRules) {
+                const ignoreRule = this.ignoreRules[logType];
+                const { lastLog } = ignoreRule;
+                if (lastLog && ignoreRule.ignore(lastLog, payload)) {
+                    lastLog.payload = ignoreRule.update(lastLog, payload);
+
+                    return ignoreRule.lastLog;
+                }
+            }
+
+            const logPayload = { ...payload };
+            logPayload.client_id = this.clientID;
+            if (this.isActiveChecker) {
+                logPayload.is_active = this.isActiveChecker();
+            }
+
+            const log = logFactory(logType, { ...logPayload });
+
+            const pushEvent = (): void => {
+                log.validatePayload();
+                log.onClose(null);
+                this.collection.push(log);
+
+                if (logType in this.ignoreRules) {
+                    this.ignoreRules[logType].lastLog = log;
+                }
             };
 
-            this.updateWorkingTime();
-            return ignoreRule.lastLog;
-        }
-    }
+            if (log.scope === LogType.exception) {
+                await serverProxy.events.save({
+                    events: [log.dump()],
+                    timestamp: new Date().toISOString(),
+                });
 
-    const logPayload = { ...payload };
-    logPayload.client_id = this.clientID;
-    if (this.isActiveChecker) {
-        logPayload.is_active = this.isActiveChecker();
-    }
+                return log;
+            }
 
-    const log = logFactory(logType, { ...logPayload });
-    if (logType in this.ignoreRules) {
-        this.ignoreRules[logType].lastLog = log;
-    }
+            if (wait) {
+                log.onClose(pushEvent);
+            } else {
+                pushEvent();
+            }
 
-    const pushEvent = () => {
-        this.updateWorkingTime();
-        log.validatePayload();
-        log.onClose(null);
-        this.collection.push(log);
-    };
+            return log;
+        },
+    },
+});
 
-    if (log.type === LogType.sendException) {
-        serverProxy.server.exception(log.dump()).catch(() => {
-            pushEvent();
-        });
+Object.defineProperties(LoggerStorage.prototype.save, {
+    implementation: {
+        writable: false,
+        enumerable: false,
+        value: async function implementation() {
+            if (!this.collection.length) {
+                return;
+            }
 
-        return log;
-    }
+            while (this.saving) {
+                await sleep(100);
+            }
 
-    if (wait) {
-        log.onClose(pushEvent);
-    } else {
-        pushEvent();
-    }
+            const collectionToSend = [...this.collection];
+            const logPayload: any = {
+                client_id: this.clientID,
+            };
 
-    return log;
-};
+            if (this.isActiveChecker) {
+                logPayload.is_active = this.isActiveChecker();
+            }
 
-LoggerStorage.prototype.save.implementation = async function () {
-    while (this.saving) {
-        await sleep(100);
-    }
+            try {
+                this.saving = true;
+                await serverProxy.events.save({
+                    events: collectionToSend.map((log) => log.dump()),
+                    timestamp: new Date().toISOString(),
+                });
+                for (const rule of Object.values<IgnoreRule>(this.ignoreRules)) {
+                    rule.lastLog = null;
+                }
+                this.collection = [];
+            } finally {
+                this.saving = false;
+            }
+        },
+    },
+});
 
-    const collectionToSend = [...this.collection];
-    const lastLog = this.collection[this.collection.length - 1];
-
-    const logPayload = {};
-    logPayload.client_id = this.clientID;
-    logPayload.working_time = this.workingTime;
-    if (this.isActiveChecker) {
-        logPayload.is_active = this.isActiveChecker();
-    }
-
-    if (lastLog && lastLog.type === LogType.sendTaskInfo) {
-        logPayload.job_id = lastLog.payload.job_id;
-        logPayload.task_id = lastLog.payload.task_id;
-    }
-
-    const userActivityLog = logFactory(LogType.sendUserActivity, logPayload);
-    collectionToSend.push(userActivityLog);
-
-    try {
-        this.saving = true;
-        await serverProxy.logs.save(collectionToSend.map((log) => log.dump()));
-        for (const rule of Object.values(this.ignoreRules)) {
-            rule.lastLog = null;
-        }
-        this.collection = [];
-        this.workingTime = 0;
-        this.lastLogTime = Date.now();
-    } finally {
-        this.saving = false;
-    }
-};
-
-module.exports = new LoggerStorage();
+export default new LoggerStorage();

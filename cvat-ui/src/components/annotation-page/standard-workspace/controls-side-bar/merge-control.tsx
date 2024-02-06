@@ -1,4 +1,5 @@
 // Copyright (C) 2020-2022 Intel Corporation
+// Copyright (C) 2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
@@ -7,20 +8,27 @@ import Icon from '@ant-design/icons';
 
 import { MergeIcon } from 'icons';
 import { Canvas } from 'cvat-canvas-wrapper';
+import { Canvas3d } from 'cvat-canvas3d-wrapper';
 import { ActiveControl } from 'reducers';
 import CVATTooltip from 'components/common/cvat-tooltip';
+import GlobalHotKeys, { KeyMapItem } from 'utils/mousetrap-react';
 
 export interface Props {
-    canvasInstance: Canvas;
+    updateActiveControl(activeControl: ActiveControl): void;
+    canvasInstance: Canvas | Canvas3d;
     activeControl: ActiveControl;
-    switchMergeShortcut: string;
     disabled?: boolean;
-    mergeObjects(enabled: boolean): void;
+    shortcuts: {
+        SWITCH_MERGE_MODE: {
+            details: KeyMapItem;
+            displayValue: string;
+        }
+    };
 }
 
 function MergeControl(props: Props): JSX.Element {
     const {
-        switchMergeShortcut, activeControl, canvasInstance, mergeObjects, disabled,
+        shortcuts, activeControl, canvasInstance, updateActiveControl, disabled,
     } = props;
 
     const dynamicIconProps =
@@ -29,7 +37,7 @@ function MergeControl(props: Props): JSX.Element {
                 className: 'cvat-merge-control cvat-active-canvas-control',
                 onClick: (): void => {
                     canvasInstance.merge({ enabled: false });
-                    mergeObjects(false);
+                    updateActiveControl(ActiveControl.CURSOR);
                 },
             } :
             {
@@ -37,16 +45,27 @@ function MergeControl(props: Props): JSX.Element {
                 onClick: (): void => {
                     canvasInstance.cancel();
                     canvasInstance.merge({ enabled: true });
-                    mergeObjects(true);
+                    updateActiveControl(ActiveControl.MERGE);
                 },
             };
 
     return disabled ? (
         <Icon className='cvat-merge-control cvat-disabled-canvas-control' component={MergeIcon} />
     ) : (
-        <CVATTooltip title={`Merge shapes/tracks ${switchMergeShortcut}`} placement='right'>
-            <Icon {...dynamicIconProps} component={MergeIcon} />
-        </CVATTooltip>
+        <>
+            <GlobalHotKeys
+                keyMap={{ SWITCH_MERGE_MODE: shortcuts.SWITCH_MERGE_MODE.details }}
+                handlers={{
+                    SWITCH_MERGE_MODE: (event: KeyboardEvent | undefined) => {
+                        if (event) event.preventDefault();
+                        dynamicIconProps.onClick();
+                    },
+                }}
+            />
+            <CVATTooltip title={`Merge shapes/tracks ${shortcuts.SWITCH_MERGE_MODE.displayValue}`} placement='right'>
+                <Icon {...dynamicIconProps} component={MergeIcon} />
+            </CVATTooltip>
+        </>
     );
 }
 

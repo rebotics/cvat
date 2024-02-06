@@ -17,7 +17,7 @@ Docker volumes are used to store all CVAT data:
 - `cvat_data`: used to store uploaded and prepared media data.
   Mounted into `cvat` container by `/home/django/data` path.
 
-- `cvat_keys`: used to store user ssh keys needed for [synchronization with a remote Git repository](/docs/manual/advanced/task-synchronization/).
+- `cvat_keys`: used to store the [Django secret key](https://docs.djangoproject.com/en/4.2/ref/settings/#std-setting-SECRET_KEY).
   Mounted into `cvat` container by `/home/django/keys` path.
 
 - `cvat_logs`: used to store logs of CVAT backend processes managed by supevisord.
@@ -32,10 +32,10 @@ Docker volumes are used to store all CVAT data:
 All CVAT containers should be stopped before backup:
 
 ```shell
-docker-compose stop
+docker compose stop
 ```
 
-Please don't forget to include all the compose config files that were used in the docker-compose command
+Please don't forget to include all the compose config files that were used in the `docker compose` command
 using the `-f` parameter.
 
 Backup data:
@@ -66,7 +66,7 @@ Note: CVAT containers must exist (if no, please follow the [installation guide](
 Stop all CVAT containers:
 
 ```shell
-docker-compose stop
+docker compose stop
 ```
 
 Restore data:
@@ -82,7 +82,7 @@ docker run --rm --name temp_backup --volumes-from cvat_elasticsearch -v $(pwd):/
 After that run CVAT as usual:
 
 ```shell
-docker-compose up -d
+docker compose up -d
 ```
 
 ## Additional resources

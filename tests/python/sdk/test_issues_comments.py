@@ -12,26 +12,25 @@ from cvat_sdk import Client
 from cvat_sdk.api_client import exceptions, models
 from cvat_sdk.core.proxies.tasks import ResourceType, Task
 
-from shared.utils.config import USER_PASS
-
 
 class TestIssuesUsecases:
     @pytest.fixture(autouse=True)
     def setup(
         self,
-        changedb,  # force fixture call order to allow DB setup
         tmp_path: Path,
+        fxt_login: Tuple[Client, str],
         fxt_logger: Tuple[Logger, io.StringIO],
-        fxt_client: Client,
         fxt_stdout: io.StringIO,
-        admin_user: str,
     ):
         self.tmp_path = tmp_path
-        _, self.logger_stream = fxt_logger
-        self.client = fxt_client
+        logger, self.logger_stream = fxt_logger
         self.stdout = fxt_stdout
-        self.user = admin_user
-        self.client.login((self.user, USER_PASS))
+        self.client, self.user = fxt_login
+        self.client.logger = logger
+
+        api_client = self.client.api_client
+        for k in api_client.configuration.logger:
+            api_client.configuration.logger[k] = logger
 
         yield
 
@@ -43,7 +42,7 @@ class TestIssuesUsecases:
                 "labels": [{"name": "car"}, {"name": "person"}],
             },
             resource_type=ResourceType.LOCAL,
-            resources=[str(fxt_image_file)],
+            resources=[fxt_image_file],
             data_params={"image_quality": 80},
         )
 
@@ -92,7 +91,7 @@ class TestIssuesUsecases:
         comment = self.client.comments.create(models.CommentWriteRequest(issue.id, message="hi!"))
         issue.fetch()
 
-        comment_ids = {c.id for c in issue.comments}
+        comment_ids = {c.id for c in issue.get_comments()}
 
         assert len(comment_ids) == 2
         assert comment.id in comment_ids
@@ -124,13 +123,14 @@ class TestIssuesUsecases:
                 message="hello",
             )
         )
+        comments = issue.get_comments()
 
         issue.remove()
 
         with pytest.raises(exceptions.NotFoundException):
             issue.fetch()
         with pytest.raises(exceptions.NotFoundException):
-            self.client.comments.retrieve(issue.comments[0].id)
+            self.client.comments.retrieve(comments[0].id)
         assert self.stdout.getvalue() == ""
 
 
@@ -138,19 +138,20 @@ class TestCommentsUsecases:
     @pytest.fixture(autouse=True)
     def setup(
         self,
-        changedb,  # force fixture call order to allow DB setup
         tmp_path: Path,
+        fxt_login: Tuple[Client, str],
         fxt_logger: Tuple[Logger, io.StringIO],
-        fxt_client: Client,
         fxt_stdout: io.StringIO,
-        admin_user: str,
     ):
         self.tmp_path = tmp_path
-        _, self.logger_stream = fxt_logger
-        self.client = fxt_client
+        logger, self.logger_stream = fxt_logger
         self.stdout = fxt_stdout
-        self.user = admin_user
-        self.client.login((self.user, USER_PASS))
+        self.client, self.user = fxt_login
+        self.client.logger = logger
+
+        api_client = self.client.api_client
+        for k in api_client.configuration.logger:
+            api_client.configuration.logger[k] = logger
 
         yield
 
@@ -162,7 +163,7 @@ class TestCommentsUsecases:
                 "labels": [{"name": "car"}, {"name": "person"}],
             },
             resource_type=ResourceType.LOCAL,
-            resources=[str(fxt_image_file)],
+            resources=[fxt_image_file],
             data_params={"image_quality": 80},
         )
 

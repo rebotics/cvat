@@ -2,13 +2,13 @@
 #
 # SPDX-License-Identifier: MIT
 
-import os.path as osp
+from pathlib import Path
 
 import requests
 from cvat_sdk.api_client import ApiClient, Configuration
 
-ROOT_DIR = __file__[: __file__.rfind(osp.join("utils", ""))]
-ASSETS_DIR = osp.abspath(osp.join(ROOT_DIR, "assets"))
+ROOT_DIR = next(dir.parent for dir in Path(__file__).parents if dir.name == "utils")
+ASSETS_DIR = (ROOT_DIR / "assets").resolve()
 # Suppress the warning from Bandit about hardcoded passwords
 USER_PASS = "!Q@W#E$R"  # nosec
 BASE_URL = "http://localhost:8080"
@@ -56,6 +56,10 @@ def post_files_method(username, endpoint, data, files, **kwargs):
     return requests.post(
         get_api_url(endpoint, **kwargs), data=data, files=files, auth=(username, USER_PASS)
     )
+
+
+def put_method(username, endpoint, data, **kwargs):
+    return requests.put(get_api_url(endpoint, **kwargs), json=data, auth=(username, USER_PASS))
 
 
 def server_get(username, endpoint, **kwargs):

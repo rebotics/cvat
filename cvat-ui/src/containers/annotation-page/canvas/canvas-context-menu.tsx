@@ -1,4 +1,5 @@
 // Copyright (C) 2020-2022 Intel Corporation
+// Copyright (C) 2022-2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
@@ -6,13 +7,16 @@ import React from 'react';
 import PropTypes from 'prop-types';
 
 import { connect } from 'react-redux';
-import { CombinedState, ContextMenuType, Workspace } from 'reducers';
+import {
+    CombinedState, ContextMenuType, ShapeType, Workspace,
+} from 'reducers';
 
-import CanvasContextMenuComponent from 'components/annotation-page/canvas/canvas-context-menu';
-import { updateCanvasContextMenu } from 'actions/annotation-actions';
+import CanvasContextMenuComponent from 'components/annotation-page/canvas/views/canvas2d/canvas-context-menu';
+import { copyShape, pasteShapeAsync, updateCanvasContextMenu } from 'actions/annotation-actions';
 import { reviewActions, finishIssueAsync } from 'actions/review-actions';
 import { ThunkDispatch } from 'utils/redux';
-import { ObjectState } from 'cvat-core-wrapper';
+import { Canvas } from 'cvat-canvas-wrapper';
+import { ObjectState, QualityConflict } from 'cvat-core-wrapper';
 
 interface OwnProps {
     readonly: boolean;
@@ -21,7 +25,9 @@ interface OwnProps {
 interface StateToProps {
     contextMenuParentID: number | null;
     contextMenuClientID: number | null;
-    objectStates: any[];
+    canvasInstance: Canvas | null;
+    objectStates: ObjectState[];
+    frameConflicts: QualityConflict[];
     visible: boolean;
     top: number;
     left: number;
@@ -29,18 +35,25 @@ interface StateToProps {
     collapsed: boolean | undefined;
     workspace: Workspace;
     latestComments: string[];
+    activatedStateID: number | null;
 }
 
 interface DispatchToProps {
+    onUpdateContextMenu(
+        visible: boolean, left: number, top: number,
+        pointID: number | null, type?: ContextMenuType,
+    ): void;
     onStartIssue(position: number[]): void;
     openIssue(position: number[], message: string): void;
+    onCopyObject(objectState: ObjectState): void;
 }
 
 function mapStateToProps(state: CombinedState): StateToProps {
     const {
         annotation: {
-            annotations: { collapsed, states: objectStates },
+            annotations: { collapsed, states: objectStates, activatedStateID },
             canvas: {
+                instance,
                 contextMenu: {
                     visible, top, left, type, clientID, parentID,
                 },
@@ -48,7 +61,7 @@ function mapStateToProps(state: CombinedState): StateToProps {
             },
             workspace,
         },
-        review: { latestComments },
+        review: { latestComments, frameConflicts },
     } = state;
 
     let objectState = objectStates.find((_state: ObjectState) => {
@@ -63,7 +76,9 @@ function mapStateToProps(state: CombinedState): StateToProps {
         contextMenuClientID: clientID,
         contextMenuParentID: parentID,
         collapsed: clientID !== null ? collapsed[clientID] : undefined,
+        activatedStateID,
         objectStates,
+        canvasInstance: instance instanceof Canvas ? instance : null,
         visible:
             clientID !== null &&
             visible &&
@@ -74,11 +89,18 @@ function mapStateToProps(state: CombinedState): StateToProps {
         type,
         workspace,
         latestComments,
+        frameConflicts,
     };
 }
 
 function mapDispatchToProps(dispatch: ThunkDispatch): DispatchToProps {
     return {
+        onUpdateContextMenu(
+            visible: boolean, left: number, top: number,
+            pointID: number | null, type?: ContextMenuType,
+        ): void {
+            dispatch(updateCanvasContextMenu(visible, left, top, pointID, type));
+        },
         onStartIssue(position: number[]): void {
             dispatch(reviewActions.startIssue(position));
             dispatch(updateCanvasContextMenu(false, 0, 0));
@@ -87,6 +109,10 @@ function mapDispatchToProps(dispatch: ThunkDispatch): DispatchToProps {
             dispatch(reviewActions.startIssue(position));
             dispatch(finishIssueAsync(message));
             dispatch(updateCanvasContextMenu(false, 0, 0));
+        },
+        onCopyObject(objectState: ObjectState): void {
+            dispatch(copyShape(objectState));
+            dispatch(pasteShapeAsync());
         },
     };
 }
@@ -129,7 +155,7 @@ class CanvasContextMenuContainer extends React.PureComponent<Props, State> {
         };
     }
 
-    static getDerivedStateFromProps(props: Props, state: State): State | null {
+    static getDerivedStateFromProps(props: Readonly<Props>, state: State): State | null {
         if (props.left === state.latestLeft && props.top === state.latestTop) {
             return null;
         }
@@ -144,8 +170,15 @@ class CanvasContextMenuContainer extends React.PureComponent<Props, State> {
     }
 
     public componentDidMount(): void {
+        const { canvasInstance } = this.props;
         this.updatePositionIfOutOfScreen();
+
         window.addEventListener('mousemove', this.moveContextMenu);
+        if (canvasInstance) {
+            canvasInstance.html().addEventListener('canvas.clicked', this.onClickCanvas);
+            canvasInstance.html().addEventListener('contextmenu', this.onOpenCanvasContextMenu);
+            canvasInstance.html().addEventListener('canvas.contextmenu', this.onCanvasPointContextMenu);
+        }
     }
 
     public componentDidUpdate(prevProps: Props): void {
@@ -180,8 +213,45 @@ class CanvasContextMenuContainer extends React.PureComponent<Props, State> {
     }
 
     public componentWillUnmount(): void {
+        const { canvasInstance } = this.props;
         window.removeEventListener('mousemove', this.moveContextMenu);
+        if (canvasInstance) {
+            canvasInstance.html().removeEventListener('canvas.clicked', this.onClickCanvas);
+            canvasInstance.html().removeEventListener('contextmenu', this.onOpenCanvasContextMenu);
+            canvasInstance.html().removeEventListener('canvas.contextmenu', this.onCanvasPointContextMenu);
+        }
     }
+
+    private onClickCanvas = (): void => {
+        const { visible, onUpdateContextMenu } = this.props;
+        if (visible) {
+            onUpdateContextMenu(false, 0, 0, null, ContextMenuType.CANVAS_SHAPE);
+        }
+    };
+
+    private onOpenCanvasContextMenu = (e: MouseEvent): void => {
+        const { activatedStateID, onUpdateContextMenu } = this.props;
+        if (e.target && !(e.target as HTMLElement).classList.contains('svg_select_points')) {
+            onUpdateContextMenu(
+                activatedStateID !== null, e.clientX, e.clientY, null, ContextMenuType.CANVAS_SHAPE,
+            );
+        }
+    };
+
+    private onCanvasPointContextMenu = (e: any): void => {
+        const { objectStates, activatedStateID, onUpdateContextMenu } = this.props;
+
+        const [state] = objectStates.filter((el: any) => el.clientID === activatedStateID);
+        if (![ShapeType.CUBOID, ShapeType.RECTANGLE, ShapeType.MASK].includes(state.shapeType)) {
+            onUpdateContextMenu(
+                activatedStateID !== null,
+                e.detail.mouseEvent.clientX,
+                e.detail.mouseEvent.clientY,
+                e.detail.pointID,
+                ContextMenuType.CANVAS_SHAPE_POINT,
+            );
+        }
+    };
 
     private moveContextMenu = (e: MouseEvent): void => {
         if (this.dragging) {
@@ -219,39 +289,41 @@ class CanvasContextMenuContainer extends React.PureComponent<Props, State> {
         }
     }
 
-    public render(): JSX.Element {
+    public render(): JSX.Element | null {
         const { left, top } = this.state;
         const {
             visible,
             contextMenuClientID,
             contextMenuParentID,
             objectStates,
+            frameConflicts,
             type,
             readonly,
             workspace,
             latestComments,
             onStartIssue,
             openIssue,
+            onCopyObject,
         } = this.props;
 
         return (
-            <>
-                {type === ContextMenuType.CANVAS_SHAPE && (
-                    <CanvasContextMenuComponent
-                        contextMenuClientID={contextMenuClientID}
-                        contextMenuParentID={contextMenuParentID}
-                        readonly={readonly}
-                        left={left}
-                        top={top}
-                        visible={visible}
-                        objectStates={objectStates}
-                        workspace={workspace}
-                        latestComments={latestComments}
-                        onStartIssue={onStartIssue}
-                        openIssue={openIssue}
-                    />
-                )}
-            </>
+            type === ContextMenuType.CANVAS_SHAPE ? (
+                <CanvasContextMenuComponent
+                    contextMenuClientID={contextMenuClientID}
+                    contextMenuParentID={contextMenuParentID}
+                    readonly={readonly}
+                    left={left}
+                    top={top}
+                    visible={visible}
+                    objectStates={objectStates}
+                    frameConflicts={frameConflicts}
+                    workspace={workspace}
+                    latestComments={latestComments}
+                    onStartIssue={onStartIssue}
+                    openIssue={openIssue}
+                    onCopyObject={onCopyObject}
+                />
+            ) : null
         );
     }
 }

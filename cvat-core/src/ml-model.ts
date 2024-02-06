@@ -1,134 +1,120 @@
 // Copyright (C) 2019-2022 Intel Corporation
+// Copyright (C) 2022-2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
-/**
- * Class representing a serverless function
- * @memberof module:API.cvat.classes
- */
-class MLModel {
-    constructor(data) {
-        this._id = data.id;
-        this._name = data.name;
-        this._labels = data.labels;
-        this._attributes = data.attributes || [];
-        this._framework = data.framework;
-        this._description = data.description;
-        this._type = data.type;
-        this._tip = {
-            message: data.help_message,
-            gif: data.animated_gif,
-        };
-        this._params = {
+import PluginRegistry from './plugins';
+import {
+    ModelProviders, ModelKind, ModelReturnType,
+} from './enums';
+import {
+    SerializedModel, ModelParams, MLModelTip, MLModelLabel,
+} from './core-types';
+
+export default class MLModel {
+    private serialized: SerializedModel;
+    private changeToolsBlockerStateCallback?: (event: string) => void;
+
+    constructor(serialized: SerializedModel) {
+        this.serialized = { ...serialized };
+    }
+
+    public get id(): string | number {
+        return this.serialized.id;
+    }
+
+    public get name(): string {
+        return this.serialized.name;
+    }
+
+    public get labels(): MLModelLabel[] {
+        return Array.isArray(this.serialized.labels_v2) ? [...this.serialized.labels_v2] : [];
+    }
+
+    public get version(): number {
+        return this.serialized.version;
+    }
+
+    public get framework(): string {
+        return this.serialized.framework;
+    }
+
+    public get description(): string {
+        return this.serialized.description;
+    }
+
+    public get kind(): ModelKind {
+        return this.serialized.kind;
+    }
+
+    public get params(): ModelParams {
+        const result: ModelParams = {
             canvas: {
-                minPosVertices: data.min_pos_points,
-                minNegVertices: data.min_neg_points,
-                startWithBox: data.startswith_box,
+                minPosVertices: this.serialized.min_pos_points,
+                minNegVertices: this.serialized.min_neg_points,
+                startWithBox: this.serialized.startswith_box,
             },
         };
-    }
 
-    /**
-     * @type {string}
-     * @readonly
-     */
-    get id() {
-        return this._id;
-    }
-
-    /**
-     * @type {string}
-     * @readonly
-     */
-    get name() {
-        return this._name;
-    }
-
-    /**
-     * @description labels supported by the model
-     * @type {string[]}
-     * @readonly
-     */
-    get labels() {
-        if (Array.isArray(this._labels)) {
-            return [...this._labels];
+        if (this.changeToolsBlockerStateCallback) {
+            result.canvas.onChangeToolsBlockerState = this.changeToolsBlockerStateCallback;
         }
 
-        return [];
+        return result;
     }
 
-    /**
-     * @typedef ModelAttribute
-     * @property {string} name
-     * @property {string[]} values
-     * @property {'select'|'number'|'checkbox'|'radio'|'text'} input_type
-     */
-    /**
-     * @type {Object<string, ModelAttribute>}
-     * @readonly
-     */
-    get attributes() {
-        return { ...this._attributes };
-    }
-
-    /**
-     * @type {string}
-     * @readonly
-     */
-    get framework() {
-        return this._framework;
-    }
-
-    /**
-     * @type {string}
-     * @readonly
-     */
-    get description() {
-        return this._description;
-    }
-
-    /**
-     * @type {module:API.cvat.enums.ModelType}
-     * @readonly
-     */
-    get type() {
-        return this._type;
-    }
-
-    /**
-     * @type {object}
-     * @readonly
-     */
-    get params() {
+    public get tip(): MLModelTip {
         return {
-            canvas: { ...this._params.canvas },
+            message: this.serialized.help_message,
+            gif: this.serialized.animated_gif,
         };
     }
 
-    /**
-     * @type {MlModelTip}
-     * @property {string} message A short message for a user about the model
-     * @property {string} gif A gif URL to be shown to a user as an example
-     * @readonly
-     */
-    get tip() {
-        return { ...this._tip };
+    public get owner(): string {
+        return this.serialized?.owner?.username || '';
     }
 
-    /**
-     * @typedef onRequestStatusChange
-     * @param {string} event
-     * @global
-    */
-    /**
-     * @param {onRequestStatusChange} onRequestStatusChange
-     * @instance
-     * @description Used to set a callback when the tool is blocked in UI
-     * @returns {void}
-    */
-    set onChangeToolsBlockerState(onChangeToolsBlockerState) {
-        this._params.canvas.onChangeToolsBlockerState = onChangeToolsBlockerState;
+    public get provider(): string {
+        return this.serialized?.provider || ModelProviders.CVAT;
+    }
+
+    public get isDeletable(): boolean {
+        return this.provider !== ModelProviders.CVAT;
+    }
+
+    public get createdDate(): string | undefined {
+        return this.serialized?.created_date;
+    }
+
+    public get updatedDate(): string | undefined {
+        return this.serialized?.updated_date;
+    }
+
+    public get url(): string | undefined {
+        return this.serialized?.url;
+    }
+
+    public get returnType(): ModelReturnType | undefined {
+        return this.serialized?.return_type;
+    }
+
+    // Used to set a callback when the tool is blocked in UI
+    public set onChangeToolsBlockerState(onChangeToolsBlockerState: (event: string) => void) {
+        this.changeToolsBlockerStateCallback = onChangeToolsBlockerState;
+    }
+
+    public async preview(): Promise<string> {
+        const result = await PluginRegistry.apiWrapper.call(this, MLModel.prototype.preview);
+        return result;
     }
 }
 
-module.exports = MLModel;
+Object.defineProperties(MLModel.prototype.preview, {
+    implementation: {
+        writable: false,
+        enumerable: false,
+        value: async function implementation(): Promise<string | null> {
+            return null;
+        },
+    },
+});

@@ -2,21 +2,18 @@
 #
 # SPDX-License-Identifier: MIT
 
-from .base import *
 import logging
-import os
 
+from .base import *
 
-DEBUG = bool(int(os.getenv('DEBUG', 0)))
+DEBUG = False
 
-INSTALLED_APPS += [
-    'mod_wsgi.server',
-]
+NUCLIO['HOST'] = os.getenv('CVAT_NUCLIO_HOST', 'nuclio')
 
 # Django-sendfile:
 # https://github.com/moggers87/django-sendfile2
-SENDFILE_BACKEND = 'django_sendfile.backends.xsendfile'
-
+SENDFILE_BACKEND = 'django_sendfile.backends.nginx'
+SENDFILE_URL = '/'
 
 # Sentry setup.
 USE_SENTRY = bool(int(os.getenv('USE_SENTRY', 1)))

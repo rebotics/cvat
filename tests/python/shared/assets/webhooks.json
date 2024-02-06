@@ -5,7 +5,7 @@
   "results": [
     {
       "content_type": "application/json",
-      "created_date": "2022-09-28T12:51:06.703000Z",
+      "created_date": "2022-09-29T08:00:48.440000Z",
       "description": "",
       "enable_ssl": true,
       "events": [
@@ -28,9 +28,9 @@
         "update:project",
         "update:task"
       ],
-      "id": 5,
+      "id": 6,
       "is_active": true,
-      "last_delivery_date": "2022-09-28T13:11:38.311000Z",
+      "last_delivery_date": "2023-09-15T07:53:53.135000Z",
       "last_status": 200,
       "organization": 1,
       "owner": {
@@ -40,11 +40,11 @@
         "url": "http://localhost:8080/api/users/1",
         "username": "admin1"
       },
-      "project": null,
-      "target_url": "http://example.com",
+      "project_id": null,
+      "target_url": "http://example.com/",
       "type": "organization",
-      "updated_date": "2022-09-28T12:51:06.703000Z",
-      "url": "http://localhost:8080/api/webhooks/5"
+      "updated_date": "2022-09-29T08:00:48.441000Z",
+      "url": "http://localhost:8080/api/webhooks/6"
     },
     {
       "content_type": "application/json",
@@ -67,7 +67,7 @@
         "url": "http://localhost:8080/api/users/3",
         "username": "user2"
       },
-      "project": 3,
+      "project_id": 3,
       "target_url": "http://example.com",
       "type": "project",
       "updated_date": "2022-09-28T12:19:49.744000Z",
@@ -101,7 +101,7 @@
         "url": "http://localhost:8080/api/users/10",
         "username": "business1"
       },
-      "project": 1,
+      "project_id": 1,
       "target_url": "http://example.com/",
       "type": "project",
       "updated_date": "2022-09-28T12:18:12.412000Z",
@@ -128,7 +128,7 @@
         "url": "http://localhost:8080/api/users/2",
         "username": "user1"
       },
-      "project": 6,
+      "project_id": 6,
       "target_url": "http://example.com/",
       "type": "project",
       "updated_date": "2022-09-28T12:16:28.311000Z",

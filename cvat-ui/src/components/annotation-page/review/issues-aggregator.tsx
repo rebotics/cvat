@@ -1,19 +1,34 @@
 // Copyright (C) 2020-2022 Intel Corporation
+// Copyright (C) 2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
 import './styles.scss';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 
-import { CombinedState } from 'reducers';
+import { ActiveControl, CombinedState } from 'reducers';
 import { Canvas } from 'cvat-canvas/src/typescript/canvas';
 
 import { commentIssueAsync, resolveIssueAsync, reopenIssueAsync } from 'actions/review-actions';
+import {
+    AnnotationConflict, ConflictSeverity, ObjectState, QualityConflict,
+} from 'cvat-core-wrapper';
 
+import { highlightConflict } from 'actions/annotation-actions';
 import CreateIssueDialog from './create-issue-dialog';
 import HiddenIssueLabel from './hidden-issue-label';
 import IssueDialog from './issue-dialog';
+import ConflictLabel from './conflict-label';
+
+interface ConflictMappingElement {
+    description: string;
+    severity: ConflictSeverity;
+    x: number;
+    y: number;
+    serverID: number;
+    conflict: QualityConflict;
+}
 
 export default function IssueAggregatorComponent(): JSX.Element | null {
     const dispatch = useDispatch();
@@ -26,11 +41,38 @@ export default function IssueAggregatorComponent(): JSX.Element | null {
     const newIssuePosition = useSelector((state: CombinedState): number[] | null => state.review.newIssuePosition);
     const issueFetching = useSelector((state: CombinedState): number | null => state.review.fetching.issueId);
     const [geometry, setGeometry] = useState<Canvas['geometry'] | null>(null);
+
+    const qualityConflicts = useSelector((state: CombinedState) => state.review.frameConflicts);
+    const objectStates = useSelector((state: CombinedState) => state.annotation.annotations.states);
+    const showConflicts = useSelector((state: CombinedState) => state.settings.shapes.showGroundTruth);
+    const highlightedConflict = useSelector((state: CombinedState) => state.annotation.annotations.highlightedConflict);
+
+    const highlightedObjectsIDs = highlightedConflict?.annotationConflicts
+        ?.map((annotationConflict: AnnotationConflict) => annotationConflict.serverID);
+
+    const activeControl = useSelector((state: CombinedState) => state.annotation.canvas.activeControl);
+
+    const canvasReady = canvasInstance instanceof Canvas && canvasIsReady;
+
+    const onEnter = useCallback((conflict: QualityConflict) => {
+        if (canvasReady && activeControl === ActiveControl.CURSOR) {
+            dispatch(highlightConflict(conflict));
+        }
+    }, [canvasReady, activeControl]);
+    const onLeave = useCallback(() => {
+        if (canvasReady && activeControl === ActiveControl.CURSOR) {
+            dispatch(highlightConflict(null));
+        }
+    }, [canvasReady, activeControl]);
+
+    const [conflictMapping, setConflictMapping] = useState<ConflictMappingElement[]>([]);
+
     const issueLabels: JSX.Element[] = [];
     const issueDialogs: JSX.Element[] = [];
+    const conflictLabels: JSX.Element[] = [];
 
     useEffect(() => {
-        if (canvasInstance instanceof Canvas) {
+        if (canvasReady) {
             const { geometry: updatedGeometry } = canvasInstance;
             setGeometry(updatedGeometry);
 
@@ -45,15 +87,15 @@ export default function IssueAggregatorComponent(): JSX.Element | null {
             return () => {
                 canvasInstance.html().removeEventListener('canvas.zoom', geometryListener);
                 canvasInstance.html().removeEventListener('canvas.fit', geometryListener);
-                canvasInstance.html().addEventListener('canvas.reshape', geometryListener);
+                canvasInstance.html().removeEventListener('canvas.reshape', geometryListener);
             };
         }
 
         return () => {};
-    }, [canvasInstance]);
+    }, [canvasReady]);
 
     useEffect(() => {
-        if (canvasInstance instanceof Canvas) {
+        if (canvasReady) {
             type IssueRegionSet = Record<number, { hidden: boolean; points: number[] }>;
             const regions = !issuesHidden ? frameIssues
                 .filter((_issue: any) => !issuesResolvedHidden || !_issue.resolved)
@@ -83,9 +125,42 @@ export default function IssueAggregatorComponent(): JSX.Element | null {
                 }
             }
         }
-    }, [newIssuePosition, frameIssues, issuesResolvedHidden, issuesHidden, canvasInstance]);
+    }, [newIssuePosition, frameIssues, issuesResolvedHidden, issuesHidden, canvasReady, showConflicts]);
 
-    if (!(canvasInstance instanceof Canvas) || !canvasIsReady || !geometry) {
+    useEffect(() => {
+        if (canvasReady && showConflicts && qualityConflicts.length) {
+            const updatedConflictMapping = qualityConflicts
+                .map((conflict: QualityConflict) => {
+                    const mainAnnotationsConflict = conflict.annotationConflicts[0];
+                    const state = objectStates.find((_state: ObjectState) => (
+                        _state.serverID === mainAnnotationsConflict.serverID &&
+                        _state.objectType === mainAnnotationsConflict.type
+                    ));
+
+                    if (state) {
+                        const points = canvasInstance.setupConflictRegions(state);
+                        if (points) {
+                            return {
+                                description: conflict.description,
+                                severity: conflict.severity,
+                                x: points[0],
+                                y: points[1],
+                                serverID: state.serverID,
+                                conflict,
+                            };
+                        }
+                    }
+
+                    return null;
+                }).filter((element) => element) as ConflictMappingElement[];
+
+            setConflictMapping(updatedConflictMapping);
+        } else {
+            setConflictMapping([]);
+        }
+    }, [geometry, objectStates, showConflicts, canvasReady, qualityConflicts]);
+
+    if (!canvasReady || !geometry) {
         return null;
     }
 
@@ -118,13 +193,12 @@ export default function IssueAggregatorComponent(): JSX.Element | null {
             issueDialogs.push(
                 <IssueDialog
                     key={issue.id}
-                    id={issue.id}
+                    issue={issue}
                     top={minY}
                     left={minX}
                     angle={-geometry.angle}
                     scale={1 / geometry.scale}
                     isFetching={issueFetching !== null}
-                    comments={issue.comments}
                     resolved={issueResolved}
                     highlight={highlight}
                     blur={blur}
@@ -143,17 +217,16 @@ export default function IssueAggregatorComponent(): JSX.Element | null {
                     }}
                 />,
             );
-        } else if (issue.comments.length) {
+        } else {
             issueLabels.push(
                 <HiddenIssueLabel
                     key={issue.id}
-                    id={issue.id}
+                    issue={issue}
                     top={minY}
                     left={minX}
                     angle={-geometry.angle}
                     scale={1 / geometry.scale}
                     resolved={issueResolved}
-                    message={issue.comments[issue.comments.length - 1].message}
                     highlight={highlight}
                     blur={blur}
                     onClick={() => {
@@ -172,6 +245,26 @@ export default function IssueAggregatorComponent(): JSX.Element | null {
         Math.min(...translated.filter((_: number, idx: number): boolean => idx % 2 !== 0)) :
         null;
 
+    for (const conflict of conflictMapping) {
+        const isConflictHighligted = highlightedObjectsIDs?.includes(conflict.serverID) || false;
+        conflictLabels.push(
+            <ConflictLabel
+                key={(Math.random() + 1).toString(36).substring(7)}
+                text={conflict.description}
+                top={conflict.y}
+                left={conflict.x}
+                angle={-geometry.angle}
+                scale={1 / geometry.scale}
+                severity={conflict.severity}
+                darken={!isConflictHighligted}
+                conflict={conflict.conflict}
+                onEnter={onEnter}
+                onLeave={onLeave}
+                tooltipVisible={isConflictHighligted}
+            />,
+        );
+    }
+
     return (
         <>
             {createLeft !== null && createTop !== null ? (
@@ -184,6 +277,7 @@ export default function IssueAggregatorComponent(): JSX.Element | null {
             ) : null}
             {issueDialogs}
             {issueLabels}
+            {conflictLabels}
         </>
     );
 }

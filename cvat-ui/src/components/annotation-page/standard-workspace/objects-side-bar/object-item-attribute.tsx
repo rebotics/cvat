@@ -7,12 +7,12 @@ import { Col } from 'antd/lib/grid';
 import Select from 'antd/lib/select';
 import Radio, { RadioChangeEvent } from 'antd/lib/radio';
 import Checkbox, { CheckboxChangeEvent } from 'antd/lib/checkbox';
-import Input from 'antd/lib/input';
 import InputNumber from 'antd/lib/input-number';
 import Text from 'antd/lib/typography/Text';
 
-import consts from 'consts';
+import config from 'config';
 import { clamp } from 'utils/math';
+import TextArea, { TextAreaRef } from 'antd/lib/input/TextArea';
 
 interface Props {
     readonly: boolean;
@@ -39,21 +39,48 @@ function attrIsTheSame(prevProps: Props, nextProps: Props): boolean {
 
 function ItemAttributeComponent(props: Props): JSX.Element {
     const {
-        attrInputType, attrValues, attrValue, attrName, attrID, readonly, changeAttribute,
+        attrInputType, attrValues, attrValue,
+        attrName, attrID, readonly, changeAttribute,
     } = props;
 
     const attrNameStyle: React.CSSProperties = { wordBreak: 'break-word', lineHeight: '1em', fontSize: 12 };
+    const ref = useRef<TextAreaRef>(null);
+    const [selectionStart, setSelectionStart] = useState<number>(attrValue.length);
+    const [localAttrValue, setAttributeValue] = useState(attrValue);
+
+    useEffect(() => {
+        // attribute value updated from inside the app (for example undo/redo)
+        if (attrValue !== localAttrValue) {
+            setAttributeValue(attrValue);
+        }
+    }, [attrValue]);
+
+    useEffect(() => {
+        // wrap to internal use effect to avoid issues
+        // with chinese keyboard
+        // https://github.com/opencv/cvat/pull/6916
+        if (localAttrValue !== attrValue) {
+            changeAttribute(attrID, localAttrValue);
+        }
+    }, [localAttrValue]);
+
+    useEffect(() => {
+        const textArea = ref?.current?.resizableTextArea?.textArea;
+        if (textArea instanceof HTMLTextAreaElement) {
+            textArea.selectionStart = selectionStart;
+            textArea.selectionEnd = selectionStart;
+        }
+    }, [attrValue]);
 
     if (attrInputType === 'checkbox') {
         return (
             <Col span={24}>
                 <Checkbox
                     className='cvat-object-item-checkbox-attribute'
-                    checked={attrValue === 'true'}
+                    checked={localAttrValue === 'true'}
                     disabled={readonly}
                     onChange={(event: CheckboxChangeEvent): void => {
-                        const value = event.target.checked ? 'true' : 'false';
-                        changeAttribute(attrID, value);
+                        setAttributeValue(event.target.checked ? 'true' : 'false');
                     }}
                 >
                     <Text style={attrNameStyle} className='cvat-text'>
@@ -76,15 +103,15 @@ function ItemAttributeComponent(props: Props): JSX.Element {
                     <Radio.Group
                         disabled={readonly}
                         size='small'
-                        value={attrValue}
+                        value={localAttrValue}
                         onChange={(event: RadioChangeEvent): void => {
-                            changeAttribute(attrID, event.target.value);
+                            setAttributeValue(event.target.value);
                         }}
                     >
                         {attrValues.map(
                             (value: string): JSX.Element => (
                                 <Radio key={value} value={value}>
-                                    {value === consts.UNDEFINED_ATTRIBUTE_VALUE ? consts.NO_BREAK_SPACE : value}
+                                    {value === config.UNDEFINED_ATTRIBUTE_VALUE ? config.NO_BREAK_SPACE : value}
                                 </Radio>
                             ),
                         )}
@@ -105,15 +132,15 @@ function ItemAttributeComponent(props: Props): JSX.Element {
                         disabled={readonly}
                         size='small'
                         onChange={(value: string): void => {
-                            changeAttribute(attrID, value);
+                            setAttributeValue(value);
                         }}
-                        value={attrValue}
+                        value={localAttrValue}
                         className='cvat-object-item-select-attribute'
                     >
                         {attrValues.map(
                             (value: string): JSX.Element => (
                                 <Select.Option key={value} value={value}>
-                                    {value === consts.UNDEFINED_ATTRIBUTE_VALUE ? consts.NO_BREAK_SPACE : value}
+                                    {value === config.UNDEFINED_ATTRIBUTE_VALUE ? config.NO_BREAK_SPACE : value}
                                 </Select.Option>
                             ),
                         )}
@@ -134,12 +161,12 @@ function ItemAttributeComponent(props: Props): JSX.Element {
                     <InputNumber
                         disabled={readonly}
                         size='small'
-                        onChange={(value: number | undefined | string): void => {
-                            if (typeof value !== 'undefined') {
-                                changeAttribute(attrID, `${clamp(+value, min, max)}`);
+                        onChange={(value: number | null): void => {
+                            if (value !== null) {
+                                setAttributeValue(`${clamp(+value, min, max)}`);
                             }
                         }}
-                        value={+attrValue}
+                        value={+localAttrValue}
                         className='cvat-object-item-number-attribute'
                         min={min}
                         max={max}
@@ -150,47 +177,27 @@ function ItemAttributeComponent(props: Props): JSX.Element {
         );
     }
 
-    const ref = useRef<Input>(null);
-    const [selection, setSelection] = useState<{
-        start: number | null;
-        end: number | null;
-        direction: 'forward' | 'backward' | 'none' | null;
-    }>({
-        start: null,
-        end: null,
-        direction: null,
-    });
-
-    useEffect(() => {
-        if (ref.current && ref.current.input) {
-            ref.current.input.selectionStart = selection.start;
-            ref.current.input.selectionEnd = selection.end;
-            ref.current.input.selectionDirection = selection.direction;
-        }
-    }, [attrValue]);
-
     return (
         <>
             <Col span={8} style={attrNameStyle}>
                 <Text className='cvat-text'>{attrName}</Text>
             </Col>
             <Col span={16}>
-                <Input
+                <TextArea
                     ref={ref}
                     size='small'
                     disabled={readonly}
-                    onChange={(event: React.ChangeEvent<HTMLInputElement>): void => {
-                        if (ref.current && ref.current.input) {
-                            setSelection({
-                                start: ref.current.input.selectionStart,
-                                end: ref.current.input.selectionEnd,
-                                direction: ref.current.input.selectionDirection,
-                            });
-                        }
-
-                        changeAttribute(attrID, event.target.value);
+                    style={{
+                        height: Math.min(120, attrValue.split('\n').length * 24),
+                        minHeight: Math.min(120, attrValue.split('\n').length * 24),
                     }}
-                    value={attrValue}
+                    onChange={(event: React.ChangeEvent<HTMLTextAreaElement>): void => {
+                        if (ref.current?.resizableTextArea?.textArea) {
+                            setSelectionStart(ref.current.resizableTextArea.textArea.selectionStart);
+                        }
+                        setAttributeValue(event.target.value);
+                    }}
+                    value={localAttrValue}
                     className='cvat-object-item-text-attribute'
                 />
             </Col>

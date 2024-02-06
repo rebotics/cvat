@@ -1,15 +1,25 @@
 # Copyright (C) 2021-2022 Intel Corporation
-# Copyright (C) 2022 CVAT.ai Corporation
+# Copyright (C) 2022-2023 CVAT.ai Corporation
 #
 # SPDX-License-Identifier: MIT
 
+import json
 from copy import deepcopy
 from http import HTTPStatus
 
 import pytest
+from cvat_sdk.api_client.api_client import ApiClient, Endpoint
 from deepdiff import DeepDiff
 
-from shared.utils.config import delete_method, get_method, options_method, patch_method
+from shared.utils.config import (
+    delete_method,
+    get_method,
+    make_api_client,
+    options_method,
+    patch_method,
+)
+
+from .utils import CollectionSimpleFilterTestBase
 
 
 class TestMetadataOrganizations:
@@ -42,7 +52,7 @@ class TestMetadataOrganizations:
         assert response.status_code == HTTPStatus.OK
 
 
-@pytest.mark.usefixtures("dontchangedb")
+@pytest.mark.usefixtures("restore_db_per_class")
 class TestGetOrganizations:
     _ORG = 2
 
@@ -75,8 +85,46 @@ class TestGetOrganizations:
         else:
             assert response.status_code == HTTPStatus.NOT_FOUND
 
+    def test_can_remove_owner_and_fetch_with_sdk(self, admin_user, organizations):
+        # test for API schema regressions
+        source_org = next(
+            org
+            for org in organizations
+            if org.get("owner") and org["owner"]["username"] != admin_user
+        ).copy()
 
-@pytest.mark.usefixtures("changedb")
+        with make_api_client(admin_user) as api_client:
+            api_client.users_api.destroy(source_org["owner"]["id"])
+
+            (_, response) = api_client.organizations_api.retrieve(source_org["id"])
+            fetched_org = json.loads(response.data)
+
+        source_org["owner"] = None
+        assert DeepDiff(source_org, fetched_org, ignore_order=True) == {}
+
+
+class TestOrganizationsListFilters(CollectionSimpleFilterTestBase):
+    field_lookups = {
+        "owner": ["owner", "username"],
+    }
+
+    @pytest.fixture(autouse=True)
+    def setup(self, restore_db_per_class, admin_user, organizations):
+        self.user = admin_user
+        self.samples = organizations
+
+    def _get_endpoint(self, api_client: ApiClient) -> Endpoint:
+        return api_client.organizations_api.list_endpoint
+
+    @pytest.mark.parametrize(
+        "field",
+        ("name", "owner", "slug"),
+    )
+    def test_can_use_simple_filter_for_object_list(self, field):
+        return super().test_can_use_simple_filter_for_object_list(field)
+
+
+@pytest.mark.usefixtures("restore_db_per_function")
 class TestPatchOrganizations:
     _ORG = 2
 
@@ -128,7 +176,7 @@ class TestPatchOrganizations:
             assert response.status_code != HTTPStatus.OK
 
 
-@pytest.mark.usefixtures("changedb")
+@pytest.mark.usefixtures("restore_db_per_function")
 class TestDeleteOrganizations:
     _ORG = 2
 

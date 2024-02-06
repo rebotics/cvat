@@ -1,17 +1,11 @@
 // Copyright (C) 2019-2022 Intel Corporation
+// Copyright (C) 2022 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
 import Platform from 'platform';
 import ErrorStackParser from 'error-stack-parser';
-// import config from './config';
 
-/**
- * Base exception class
- * @memberof module:API.cvat.exceptions
- * @extends Error
- * @ignore
- */
 export class Exception extends Error {
     private readonly time: string;
     private readonly system: string;
@@ -21,9 +15,6 @@ export class Exception extends Error {
     private readonly line: number;
     private readonly column: number;
 
-    /**
-     * @param {string} message - Exception message
-     */
     constructor(message) {
         super(message);
         const time = new Date().toISOString();
@@ -33,11 +24,6 @@ export class Exception extends Error {
         const filename = `${info.fileName}`;
         const line = info.lineNumber;
         const column = info.columnNumber;
-
-        // TODO: NOT IMPLEMENTED?
-        // const {
-        //     jobID, taskID, clientID, projID,
-        // } = config;
 
         Object.defineProperties(
             this,
@@ -72,46 +58,6 @@ export class Exception extends Error {
                      */
                     get: () => time,
                 },
-                // jobID: {
-                //     /**
-                //      * @name jobID
-                //      * @type {number}
-                //      * @memberof module:API.cvat.exceptions.Exception
-                //      * @readonly
-                //      * @instance
-                //      */
-                //     get: () => jobID,
-                // },
-                // taskID: {
-                //     /**
-                //      * @name taskID
-                //      * @type {number}
-                //      * @memberof module:API.cvat.exceptions.Exception
-                //      * @readonly
-                //      * @instance
-                //      */
-                //     get: () => taskID,
-                // },
-                // projID: {
-                //     /**
-                //      * @name projID
-                //      * @type {number}
-                //      * @memberof module:API.cvat.exceptions.Exception
-                //      * @readonly
-                //      * @instance
-                //      */
-                //     get: () => projID,
-                // },
-                // clientID: {
-                //     /**
-                //      * @name clientID
-                //      * @type {number}
-                //      * @memberof module:API.cvat.exceptions.Exception
-                //      * @readonly
-                //      * @instance
-                //      */
-                //     get: () => clientID,
-                // },
                 filename: {
                     /**
                      * @name filename
@@ -145,107 +91,22 @@ export class Exception extends Error {
             }),
         );
     }
-
-    /**
-     * Save an exception on a server
-     * @name save
-     * @method
-     * @memberof Exception
-     * @instance
-     * @async
-     */
-    async save(): Promise<void> {
-        const exceptionObject = {
-            system: this.system,
-            client: this.client,
-            time: this.time,
-            // job_id: this.jobID,
-            // task_id: this.taskID,
-            // proj_id: this.projID,
-            // client_id: this.clientID,
-            message: this.message,
-            filename: this.filename,
-            line: this.line,
-            column: this.column,
-            stack: this.stack,
-        };
-
-        try {
-            const serverProxy = require('./server-proxy').default;
-            await serverProxy.server.exception(exceptionObject);
-        } catch (exception) {
-            // add event
-        }
-    }
 }
 
-/**
- * Exceptions are referred with arguments data
- * @memberof module:API.cvat.exceptions
- * @extends module:API.cvat.exceptions.Exception
- */
-export class ArgumentError extends Exception {
-    /**
-     * @param {string} message - Exception message
-     */
-}
+export class ArgumentError extends Exception {}
 
-/**
- * Unexpected problems with data which are not connected with a user input
- * @memberof module:API.cvat.exceptions
- * @extends module:API.cvat.exceptions.Exception
- */
-export class DataError extends Exception {
-    /**
-     * @param {string} message - Exception message
-     */
-}
+export class DataError extends Exception {}
 
-/**
- * Unexpected situations in code
- * @memberof module:API.cvat.exceptions
- * @extends module:API.cvat.exceptions.Exception
- */
-export class ScriptingError extends Exception {
-    /**
-     * @param {string} message - Exception message
-     */
-}
+export class ScriptingError extends Exception {}
 
-/**
- * Plugin-referred exceptions
- * @memberof module:API.cvat.exceptions
- * @extends module:API.cvat.exceptions.Exception
- */
-export class PluginError extends Exception {
-    /**
-     * @param {string} message - Exception message
-     */
-}
-
-/**
- * Exceptions in interaction with a server
- * @memberof module:API.cvat.exceptions
- * @extends module:API.cvat.exceptions.Exception
- */
 export class ServerError extends Exception {
-    /**
-     * @param {string} message - Exception message
-     * @param {(string|number)} code - Response code
-     */
+    public code: number;
     constructor(message, code) {
         super(message);
 
         Object.defineProperties(
             this,
             Object.freeze({
-                /**
-                 * @name code
-                 * @type {(string|number)}
-                 * @memberof module:API.cvat.exceptions.ServerError
-                 * @readonly
-                 * @instance
-                 */
                 code: {
                     get: () => code,
                 },

@@ -15,10 +15,6 @@ import data.utils
 #         "owner": {
 #             "id": <num>
 #         },
-#         "user": {
-#             "num_resources": <num>,
-#             "role": <"owner"|"maintainer"|"supervisor"|"worker"> or null
-#         }
 #     }
 # }
 
@@ -48,27 +44,25 @@ is_member {
     input.auth.organization.user.role != null
 }
 
-get_priority(role) = priority {
-    priority := {
-        OWNER: 0,
-        MAINTAINER: 50,
-        SUPERVISOR: 75,
-        WORKER: 100
-    }[role]
-}
+get_priority(role) := {
+    OWNER: 0,
+    MAINTAINER: 50,
+    SUPERVISOR: 75,
+    WORKER: 100
+}[role]
 
 has_perm(role) {
     get_priority(input.auth.organization.user.role) <= get_priority(role)
 }
 
-default allow = false
+default allow := false
+
 allow {
     utils.is_admin
 }
 
 allow {
     input.scope == utils.CREATE
-    input.resource.user.num_resources == 0
     utils.has_perm(utils.USER)
 }
 
@@ -77,15 +71,15 @@ allow {
     utils.has_perm(utils.BUSINESS)
 }
 
-allow {
-    input.scope == utils.LIST
+filter := [] { # Django Q object to filter list of entries
+    utils.is_admin
+} else := qobject {
+    user := input.auth.user
+    qobject := [{"members__user_id": user.id}, {"members__is_active": true}, "&", {"owner_id": user.id}, "|" ]
 }
 
-filter = [] { # Django Q object to filter list of entries
-    utils.is_admin
-} else = qobject {
-    user := input.auth.user
-    qobject := [ {"owner_id": user.id}, {"members__user_id": user.id}, "|" ]
+allow {
+    input.scope == utils.LIST
 }
 
 allow {

@@ -3,9 +3,8 @@
 #
 # SPDX-License-Identifier: MIT
 
-import glob
 import json
-import os.path as osp
+from pathlib import Path
 
 import pytest
 from deepdiff import DeepDiff
@@ -13,12 +12,15 @@ from deepdiff import DeepDiff
 from shared.utils import config
 
 
-@pytest.mark.usefixtures("dontchangedb")
+@pytest.mark.usefixtures("restore_db_per_class")
 class TestGetResources:
-    @pytest.mark.parametrize("path", glob.glob(osp.join(config.ASSETS_DIR, "*.json")))
-    def test_check_objects_integrity(self, path):
+    @pytest.mark.parametrize("path", config.ASSETS_DIR.glob("*.json"))
+    def test_check_objects_integrity(self, path: Path):
         with open(path) as f:
-            endpoint = osp.basename(path).rsplit(".")[0]
+            endpoint = path.stem
+            if endpoint in ["quality_settings", "quality_reports", "quality_conflicts"]:
+                endpoint = "/".join(endpoint.split("_"))
+
             if endpoint == "annotations":
                 objects = json.load(f)
                 for jid, annotations in objects["job"].items():

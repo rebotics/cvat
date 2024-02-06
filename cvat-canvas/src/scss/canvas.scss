@@ -1,7 +1,9 @@
 // Copyright (C) 2020-2022 Intel Corporation
-// Copyright (C) 2022 CVAT.ai Corp
+// Copyright (C) 2022-2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
+
+/* stylelint-disable selector-class-pattern, selector-id-pattern */
 
 .cvat_canvas_hidden {
     display: none;
@@ -65,11 +67,21 @@ polyline.cvat_shape_drawing_opacity {
     stroke: red;
 }
 
-.cvat_canvas_shape_grouping {
+.cvat_canvas_shape_selection {
     @extend .cvat_shape_action_dasharray;
     @extend .cvat_shape_action_opacity;
 
-    fill: darkmagenta;
+    fill: #fcfbfc;
+}
+
+image.cvat_canvas_shape_selection {
+    visibility: hidden;
+}
+
+.cvat_canvas_selection_box {
+    fill: white;
+    fill-opacity: 0.1;
+    stroke: white;
 }
 
 .cvat_canvas_shape_region_selection {
@@ -81,6 +93,7 @@ polyline.cvat_shape_drawing_opacity {
 }
 
 .cvat_canvas_issue_region {
+    pointer-events: none;
     stroke-width: 0;
 }
 
@@ -88,7 +101,7 @@ circle.cvat_canvas_issue_region {
     opacity: 1 !important;
 }
 
-polyline.cvat_canvas_shape_grouping {
+polyline.cvat_canvas_shape_selection {
     @extend .cvat_shape_action_dasharray;
     @extend .cvat_shape_action_opacity;
 
@@ -144,9 +157,62 @@ polyline.cvat_canvas_shape_splitting {
     stroke-dasharray: 5;
 }
 
+.cvat_canvas_ground_truth {
+    stroke-dasharray: 1;
+}
+
+.cvat_canvas_conflicted {
+    stroke: #ff4800;
+    fill: #ff4800;
+
+    rect,
+    ellipse,
+    polygon,
+    polyline,
+    line {
+        fill: #ff4800;
+        stroke: #ff4800;
+    }
+
+    circle {
+        fill: #ff4800;
+    }
+}
+
+.cvat_canvas_warned {
+    stroke: #ff7301;
+    fill: #ff7301;
+
+    rect,
+    ellipse,
+    polygon,
+    polyline,
+    line {
+        fill: #ff7301;
+        stroke: #ff7301;
+    }
+
+    circle {
+        fill: #ff7301;
+    }
+}
+
+.cvat_canvas_shape_occluded_point {
+    stroke-dasharray: 1 !important;
+    stroke: white;
+}
+
+circle.cvat_canvas_shape_occluded {
+    @extend .cvat_canvas_shape_occluded_point;
+}
+
 g.cvat_canvas_shape_occluded {
     > rect {
         stroke-dasharray: 5;
+    }
+
+    > circle {
+        @extend .cvat_canvas_shape_occluded_point;
     }
 }
 
@@ -248,15 +314,19 @@ g.cvat_canvas_shape_occluded {
     transform: none !important;
 }
 
+.cvat_canvas_shape > .cvat_canvas_skeleton_wrapping_rect {
+    visibility: hidden;
+}
+
+.cvat_canvas_shape.cvat_canvas_shape_activated > .cvat_canvas_skeleton_wrapping_rect {
+    visibility: initial;
+}
+
 .cvat_canvas_pixelized {
-    image-rendering: optimizeSpeed;             /* Legal fallback */
-    image-rendering: -moz-crisp-edges;          /* Firefox        */
-    image-rendering: -o-crisp-edges;            /* Opera          */
-    image-rendering: -webkit-optimize-contrast; /* Safari         */
-    image-rendering: optimize-contrast;         /* CSS3 Proposed  */
-    image-rendering: crisp-edges;               /* CSS4 Proposed  */
-    image-rendering: pixelated;                 /* CSS4 Proposed  */
-    -ms-interpolation-mode: nearest-neighbor;   /* IE8+           */
+    image-rendering: optimizeSpeed;
+    image-rendering: optimize-contrast;
+    image-rendering: crisp-edges;
+    image-rendering: pixelated;
 }
 
 .cvat_canvas_removed_image {
@@ -273,19 +343,36 @@ g.cvat_canvas_shape_occluded {
     position: relative;
 }
 
-#cvat_canvas_loading_animation {
-    z-index: 1;
-    position: absolute;
-    width: 100%;
-    height: 100%;
-}
+.cvat-canvas-highlight-enabled {
+    svg {
+        >rect:not(.cvat_canvas_issue_region,.cvat_canvas_conflicted,.cvat_canvas_warned),
+        >ellipse:not(.cvat_canvas_issue_region,.cvat_canvas_conflicted,.cvat_canvas_warned),
+        >polygon:not(.cvat_canvas_issue_region,.cvat_canvas_conflicted,.cvat_canvas_warned),
+        >polyline:not(.cvat_canvas_issue_region,.cvat_canvas_conflicted,.cvat_canvas_warned),
+        >line:not(.cvat_canvas_issue_region,.cvat_canvas_conflicted,.cvat_canvas_warned) {
+            fill: gray;
+            stroke: gray;
+        }
 
-#cvat_canvas_loading_circle {
-    fill-opacity: 0;
-    stroke: #09c;
-    stroke-width: 3px;
-    stroke-dasharray: 50;
-    animation: loadingAnimation 1s linear infinite;
+        >circle:not(.cvat_canvas_issue_region,.cvat_canvas_conflicted,.cvat_canvas_warned) {
+            fill: gray;
+        }
+
+        >g:not(.cvat_canvas_issue_region,.cvat_canvas_conflicted,.cvat_canvas_warned) {
+            rect,
+            ellipse,
+            polygon,
+            polyline,
+            line {
+                fill: gray;
+                stroke: gray;
+            }
+
+            circle {
+                fill: gray;
+            }
+        }
+    }
 }
 
 #cvat_canvas_text_content {
@@ -303,7 +390,7 @@ g.cvat_canvas_shape_occluded {
     background-repeat: no-repeat;
     width: 100%;
     height: 100%;
-    box-shadow: 2px 2px 5px 0 rgba(0, 0, 0, 0.75);
+    box-shadow: 2px 2px 5px 0 rgba(0, 0, 0, 75%);
 }
 
 #cvat_canvas_bitmap {
@@ -315,7 +402,7 @@ g.cvat_canvas_shape_occluded {
     background: black;
     width: 100%;
     height: 100%;
-    box-shadow: 2px 2px 5px 0 rgba(0, 0, 0, 0.75);
+    box-shadow: 2px 2px 5px 0 rgba(0, 0, 0, 75%);
 }
 
 #cvat_canvas_grid {
@@ -332,12 +419,19 @@ g.cvat_canvas_shape_occluded {
 }
 
 #cvat_canvas_content {
+    @extend .cvat_canvas_pixelized;
+
     filter: contrast(120%) saturate(150%);
     position: absolute;
     z-index: 2;
     outline: 10px solid black;
     width: 100%;
     height: 100%;
+}
+
+.cvat_masks_canvas_wrapper {
+    z-index: 3;
+    display: none;
 }
 
 #cvat_canvas_attachment_board {
@@ -349,19 +443,24 @@ g.cvat_canvas_shape_occluded {
     user-select: none;
 }
 
-@keyframes loadingAnimation {
-    0% {
-        stroke-dashoffset: 1;
-        stroke: #09c;
-    }
+.cvat_canvas_shape_darken {
+    fill: #838383;
+    stroke: #838383;
+}
 
-    50% {
-        stroke-dashoffset: 100;
-        stroke: #f44;
-    }
+.cvat_canvas_sliced_contour  {
+    fill-opacity: 0.01;
+}
 
-    100% {
-        stroke-dashoffset: 300;
-        stroke: #09c;
-    }
+.cvat_canvas_slicing_line {
+    pointer-events: none;
+    fill-opacity: 0;
+}
+
+.cvat-canvas-notification-list-warning {
+    color: orange;
+}
+
+.cvat-canvas-notification-list-shortcuts {
+    color: yellow;
 }

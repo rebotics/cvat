@@ -1,4 +1,8 @@
 package tasks
+
+import future.keywords.if
+import future.keywords.in
+
 import data.utils
 import data.organizations
 
@@ -33,9 +37,6 @@ import data.organizations
 #             "assignee": { "id": <num> },
 #             "organization": { "id": <num> } or null,
 #         } or null,
-#         "user": {
-#             "num_resources": <num>
-#         }
 #     }
 # }
 
@@ -75,7 +76,7 @@ is_task_staff {
     is_task_assignee
 }
 
-default allow = false
+default allow := false
 
 allow {
     utils.is_admin
@@ -85,7 +86,6 @@ allow {
     { utils.CREATE, utils.IMPORT_BACKUP }[input.scope]
     utils.is_sandbox
     utils.has_perm(utils.USER)
-    input.resource.user.num_resources < 10
 }
 
 allow {
@@ -93,7 +93,6 @@ allow {
     input.auth.organization.id == input.resource.organization.id
     utils.has_perm(utils.USER)
     organizations.has_perm(organizations.SUPERVISOR)
-    input.resource.user.num_resources < 10
 }
 
 allow {
@@ -113,7 +112,6 @@ allow {
     input.scope == utils.CREATE_IN_PROJECT
     utils.is_sandbox
     utils.has_perm(utils.USER)
-    input.resource.user.num_resources < 10
     is_project_staff
 }
 
@@ -122,7 +120,6 @@ allow {
     input.auth.organization.id == input.resource.organization.id
     utils.has_perm(utils.USER)
     organizations.has_perm(organizations.SUPERVISOR)
-    input.resource.user.num_resources < 10
 }
 
 allow {
@@ -131,7 +128,6 @@ allow {
     utils.has_perm(utils.USER)
     organizations.has_perm(organizations.WORKER)
     is_project_staff
-    input.resource.user.num_resources < 10
 }
 
 allow {
@@ -146,14 +142,6 @@ allow {
     input.auth.organization.id == input.resource.organization.id
     utils.has_perm(utils.BUSINESS)
     organizations.has_perm(organizations.SUPERVISOR)
-}
-
-allow {
-    input.scope == utils.CREATE_IN_PROJECT
-    input.auth.organization.id == input.resource.organization.id
-    utils.has_perm(utils.BUSINESS)
-    organizations.has_perm(organizations.WORKER)
-    is_project_staff
 }
 
 allow {
@@ -166,26 +154,26 @@ allow {
     organizations.is_member
 }
 
-filter = [] { # Django Q object to filter list of entries
+filter := [] { # Django Q object to filter list of entries
     utils.is_admin
     utils.is_sandbox
-} else = qobject {
+} else := qobject {
     utils.is_admin
     utils.is_organization
     qobject := [ {"organization": input.auth.organization.id},
         {"project__organization": input.auth.organization.id}, "|"]
-} else = qobject {
+} else := qobject {
     utils.is_sandbox
     user := input.auth.user
     qobject := [ {"owner_id": user.id}, {"assignee_id": user.id}, "|",
         {"project__owner_id": user.id}, "|", {"project__assignee_id": user.id}, "|"]
-} else = qobject {
+} else := qobject {
     utils.is_organization
     utils.has_perm(utils.USER)
     organizations.has_perm(organizations.MAINTAINER)
     qobject := [ {"organization": input.auth.organization.id},
         {"project__organization": input.auth.organization.id}, "|"]
-} else = qobject {
+} else := qobject {
     organizations.has_perm(organizations.WORKER)
     user := input.auth.user
     qobject := [ {"owner_id": user.id}, {"assignee_id": user.id}, "|",

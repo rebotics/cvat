@@ -1,13 +1,13 @@
 // Copyright (C) 2021-2022 Intel Corporation
+// Copyright (C) 2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
 import { connect } from 'react-redux';
 import { KeyMap } from 'utils/mousetrap-react';
-import { Canvas } from 'cvat-canvas-wrapper';
 import { Canvas3d } from 'cvat-canvas3d-wrapper';
 import {
-    groupObjects,
+    updateActiveControl as updateActiveControlAction,
     pasteShapeAsync,
     redrawShapeAsync,
     repeatDrawShapeAsync,
@@ -17,7 +17,7 @@ import ControlsSideBarComponent from 'components/annotation-page/standard3D-work
 import { ActiveControl, CombinedState } from 'reducers';
 
 interface StateToProps {
-    canvasInstance: Canvas | Canvas3d;
+    canvasInstance: Canvas3d;
     activeControl: ActiveControl;
     keyMap: KeyMap;
     normalizedKeyMap: Record<string, string>;
@@ -30,7 +30,7 @@ interface DispatchToProps {
     redrawShape(): void;
     pasteShape(): void;
     resetGroup(): void;
-    groupObjects(enabled: boolean): void;
+    updateActiveControl(activeControl: ActiveControl): void;
 }
 
 function mapStateToProps(state: CombinedState): StateToProps {
@@ -43,7 +43,7 @@ function mapStateToProps(state: CombinedState): StateToProps {
     } = state;
 
     return {
-        canvasInstance,
+        canvasInstance: canvasInstance as Canvas3d,
         activeControl,
         normalizedKeyMap,
         keyMap,
@@ -63,11 +63,11 @@ function dispatchToProps(dispatch: any): DispatchToProps {
         pasteShape(): void {
             dispatch(pasteShapeAsync());
         },
-        groupObjects(enabled: boolean): void {
-            dispatch(groupObjects(enabled));
-        },
         resetGroup(): void {
             dispatch(resetAnnotationsGroup());
+        },
+        updateActiveControl(activeControl: ActiveControl): void {
+            dispatch(updateActiveControlAction(activeControl));
         },
     };
 }

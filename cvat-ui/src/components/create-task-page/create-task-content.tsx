@@ -1,5 +1,5 @@
 // Copyright (C) 2020-2022 Intel Corporation
-// Copyright (C) 2022 CVAT.ai Corporation
+// Copyright (C) 2022-2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
@@ -16,15 +16,10 @@ import Alert from 'antd/lib/alert';
 import { ValidateErrorEntity } from 'rc-field-form/lib/interface';
 import { StorageLocation } from 'reducers';
 import { getCore, Storage } from 'cvat-core-wrapper';
-import ConnectedFileManager from 'containers/file-manager/file-manager';
 import LabelsEditor from 'components/labels-editor/labels-editor';
-import { Files } from 'components/file-manager/file-manager';
-
-import {
-    getFileContentType,
-    getContentTypeRemoteFile,
-    getFileNameFromPath,
-} from 'utils/files';
+import FileManagerComponent, { Files } from 'components/file-manager/file-manager';
+import { RemoteFile } from 'components/file-manager/remote-browser';
+import { getFileContentType, getContentTypeRemoteFile, getFileNameFromPath } from 'utils/files';
 
 import { Priority } from 'enums';
 import BasicConfigurationForm, { BaseConfiguration } from './basic-configuration-form';
@@ -48,11 +43,15 @@ export interface CreateTaskData {
     cloudStorageId: number | null;
 }
 
+enum SupportedShareTypes {
+    IMAGE = 'image',
+    DIR = 'DIR',
+    VIDEO = 'video',
+}
+
 interface Props {
     onCreate: (data: CreateTaskData, onProgress?: (status: string, progress?: number) => void) => Promise<any>;
     projectId: number | null;
-    installedGit: boolean;
-    dumpers:[];
     many: boolean;
 }
 
@@ -72,7 +71,6 @@ const defaultState: State = {
     },
     subset: '',
     advanced: {
-        lfs: false,
         useZipChunks: true,
         useCache: true,
         sortingMethod: SortingMethod.LEXICOGRAPHICAL,
@@ -104,14 +102,60 @@ const defaultState: State = {
 };
 
 const UploadFileErrorMessages = {
-    one: 'It can not be processed. You can upload an archive with images, a video or multiple images',
-    multi: 'It can not be processed. You can upload one or more videos',
+    one: 'Wrong list of files. You can upload an archive with images, a video, a pdf file or multiple images. ',
+    multi: 'Wrong list of files. You can upload one or more videos. ',
 };
+
+function receiveExtensions(files: RemoteFile[]): string[] {
+    const fileTypes = files.filter((file: RemoteFile) => file.name.includes('.'))
+        .map((file: RemoteFile) => `.${file.name.split('.').pop()}`);
+    return fileTypes;
+}
+
+function checkFiles(files: RemoteFile[], type: SupportedShareTypes, baseError: string): string {
+    const erroredFiles = files.filter(
+        (it) => it.mimeType !== type,
+    );
+    if (erroredFiles.length !== 0) {
+        const unsupportedTypes = receiveExtensions(erroredFiles);
+        const extensionList = Array.from(new Set(unsupportedTypes));
+        return extensionList.length ? `${baseError} Found unsupported types: ${extensionList.join(', ')}. ` : baseError;
+    }
+    return '';
+}
+
+function validateRemoteFiles(remoteFiles: RemoteFile[], many: boolean): string {
+    let uploadFileErrorMessage = '';
+    const regFiles = remoteFiles.filter((file) => file.type === 'REG');
+    const excludedManifests = regFiles.filter((file) => !file.key.endsWith('.jsonl'));
+    if (!many && excludedManifests.length > 1) {
+        uploadFileErrorMessage = checkFiles(
+            excludedManifests,
+            SupportedShareTypes.IMAGE,
+            UploadFileErrorMessages.one,
+        );
+    } else if (many) {
+        uploadFileErrorMessage = checkFiles(
+            regFiles,
+            SupportedShareTypes.VIDEO,
+            UploadFileErrorMessages.multi,
+        );
+    }
+    return uploadFileErrorMessage;
+}
+
+function filterFiles(remoteFiles: RemoteFile[], many: boolean): RemoteFile[] {
+    if (many) {
+        return remoteFiles.filter((file: RemoteFile) => file.mimeType === 'video');
+    }
+
+    return remoteFiles;
+}
 
 class CreateTaskContent extends React.PureComponent<Props & RouteComponentProps, State> {
     private basicConfigurationComponent: RefObject<BasicConfigurationForm>;
     private advancedConfigurationComponent: RefObject<AdvancedConfigurationForm>;
-    private fileManagerContainer: any;
+    private fileManagerComponent: any;
 
     public constructor(props: Props & RouteComponentProps) {
         super(props);
@@ -145,7 +189,7 @@ class CreateTaskContent extends React.PureComponent<Props & RouteComponentProps,
         this.basicConfigurationComponent.current?.resetFields();
         this.advancedConfigurationComponent.current?.resetFields();
 
-        this.fileManagerContainer.reset();
+        this.fileManagerComponent.reset();
 
         this.setState((state) => ({
             ...defaultState,
@@ -163,7 +207,7 @@ class CreateTaskContent extends React.PureComponent<Props & RouteComponentProps,
 
         if (activeFileManagerTab === 'cloudStorage') {
             this.setState({
-                cloudStorageId: this.fileManagerContainer.getCloudStorageId(),
+                cloudStorageId: this.fileManagerComponent.getCloudStorageId(),
             });
         }
         const totalLen = Object.keys(files).reduce((acc, key: string) => acc + files[(key as TabName)].length, 0);
@@ -251,10 +295,15 @@ class CreateTaskContent extends React.PureComponent<Props & RouteComponentProps,
 
         let uploadFileErrorMessage = '';
 
-        if (!many && uploadedFiles.length > 1) {
-            uploadFileErrorMessage = uploadedFiles.every((it) => (getFileContentType(it) === 'image' || it.name === 'manifest.jsonl')) ? '' : UploadFileErrorMessages.one;
+        const excludedManifests = uploadedFiles.filter((x: File) => !x.name.endsWith('.jsonl'));
+        if (!many && excludedManifests.length > 1) {
+            uploadFileErrorMessage = excludedManifests.every((it) => (
+                getFileContentType(it) === SupportedShareTypes.IMAGE
+            )) ? '' : UploadFileErrorMessages.one;
         } else if (many) {
-            uploadFileErrorMessage = uploadedFiles.every((it) => getFileContentType(it) === 'video') ? '' : UploadFileErrorMessages.multi;
+            uploadFileErrorMessage = excludedManifests.every(
+                (it) => getFileContentType(it) === SupportedShareTypes.VIDEO,
+            ) ? '' : UploadFileErrorMessages.multi;
         }
 
         this.setState({
@@ -271,7 +320,7 @@ class CreateTaskContent extends React.PureComponent<Props & RouteComponentProps,
         }
     };
 
-    private handleUploadRemoteFiles = async (urls: string[]): Promise<void> => {
+    private handleUploadRemoteFiles = (urls: string[]): void => {
         const { many } = this.props;
 
         const { files } = this.state;
@@ -283,7 +332,7 @@ class CreateTaskContent extends React.PureComponent<Props & RouteComponentProps,
             if (!many && length > 1) {
                 let index = 0;
                 while (index < length) {
-                    const isImageFile = await getContentTypeRemoteFile(urls[index]) === 'image';
+                    const isImageFile = getContentTypeRemoteFile(urls[index]) === 'image';
                     if (!isImageFile) {
                         uploadFileErrorMessage = UploadFileErrorMessages.one;
                         break;
@@ -293,7 +342,7 @@ class CreateTaskContent extends React.PureComponent<Props & RouteComponentProps,
             } else if (many) {
                 let index = 0;
                 while (index < length) {
-                    const isVideoFile = await getContentTypeRemoteFile(urls[index]) === 'video';
+                    const isVideoFile = getContentTypeRemoteFile(urls[index]) === 'video';
                     if (!isVideoFile) {
                         uploadFileErrorMessage = UploadFileErrorMessages.multi;
                         break;
@@ -319,47 +368,38 @@ class CreateTaskContent extends React.PureComponent<Props & RouteComponentProps,
         }
     };
 
-    private handleUploadShareFiles = (shareFiles: {
-        key: string;
-        type: string;
-        mime_type: string;
-    }[]): void => {
-        const { many } = this.props;
+    private handleUploadShareFiles = (shareFiles: RemoteFile[]): void => {
         const { files } = this.state;
-
-        let uploadFileErrorMessage = '';
-
-        if (!many && shareFiles.length > 1) {
-            uploadFileErrorMessage = shareFiles.every((it) => it.mime_type === 'image') ?
-                '' : UploadFileErrorMessages.one;
-        } else if (many) {
-            uploadFileErrorMessage = shareFiles.every((it) => it.mime_type === 'video') ?
-                '' : UploadFileErrorMessages.multi;
-        }
-
-        this.setState({
-            uploadFileErrorMessage,
-        });
+        const { many } = this.props;
+        const uploadFileErrorMessage = validateRemoteFiles(shareFiles, many);
+        const filteredFiles = filterFiles(shareFiles, many);
+        this.setState({ uploadFileErrorMessage });
 
         if (!uploadFileErrorMessage) {
             this.setState({
                 files: {
                     ...files,
-                    share: shareFiles.map((it) => it.key),
+                    share: filteredFiles.map((it) => it.key),
                 },
             });
         }
     };
 
-    private handleUploadCloudStorageFiles = (cloudStorageFiles: string[]): void => {
+    private handleUploadCloudStorageFiles = (cloudStorageFiles: RemoteFile[]): void => {
         const { files } = this.state;
+        const { many } = this.props;
+        const uploadFileErrorMessage = validateRemoteFiles(cloudStorageFiles, many);
+        const filteredFiles = filterFiles(cloudStorageFiles, many);
+        this.setState({ uploadFileErrorMessage });
 
-        this.setState({
-            files: {
-                ...files,
-                cloudStorage: cloudStorageFiles,
-            },
-        });
+        if (!uploadFileErrorMessage) {
+            this.setState({
+                files: {
+                    ...files,
+                    cloudStorage: filteredFiles.map((it) => it.key),
+                },
+            });
+        }
     };
 
     private validateBlocks = (): Promise<any> => new Promise((resolve, reject) => {
@@ -555,7 +595,7 @@ class CreateTaskContent extends React.PureComponent<Props & RouteComponentProps,
         }, resolve);
     });
 
-    private handleSubmitMutliTasks = (): void => {
+    private handleSubmitMultiTasks = (): void => {
         this.validateBlocks()
             .then(() => {
                 this.addMultiTasks();
@@ -766,15 +806,15 @@ class CreateTaskContent extends React.PureComponent<Props & RouteComponentProps,
                 <Col span={24}>
                     <Text type='danger'>* </Text>
                     <Text className='cvat-text-color'>Select files</Text>
-                    <ConnectedFileManager
+                    <FileManagerComponent
                         many={many}
                         onChangeActiveKey={this.changeFileManagerTab}
                         onUploadLocalFiles={this.handleUploadLocalFiles}
                         onUploadRemoteFiles={this.handleUploadRemoteFiles}
                         onUploadShareFiles={this.handleUploadShareFiles}
                         onUploadCloudStorageFiles={this.handleUploadCloudStorageFiles}
-                        ref={(container: any): void => {
-                            this.fileManagerContainer = container;
+                        ref={(component): void => {
+                            this.fileManagerComponent = component;
                         }}
                     />
                 </Col>
@@ -793,7 +833,6 @@ class CreateTaskContent extends React.PureComponent<Props & RouteComponentProps,
     }
 
     private renderAdvancedBlock(): JSX.Element {
-        const { installedGit, dumpers } = this.props;
         const { activeFileManagerTab, projectId } = this.state;
 
         const {
@@ -813,8 +852,6 @@ class CreateTaskContent extends React.PureComponent<Props & RouteComponentProps,
                 <Collapse className='cvat-advanced-configuration-wrapper'>
                     <Collapse.Panel key='1' header={<Text className='cvat-title'>Advanced configuration</Text>}>
                         <AdvancedConfigurationForm
-                            dumpers={dumpers}
-                            installedGit={installedGit}
                             activeFileManagerTab={activeFileManagerTab}
                             ref={this.advancedConfigurationComponent}
                             onSubmit={this.handleSubmitAdvancedConfiguration}
@@ -845,14 +882,24 @@ class CreateTaskContent extends React.PureComponent<Props & RouteComponentProps,
             return (<Alert message={status} />);
         }
         return (
-            <Row justify='end' gutter={5}>
+            <Row justify='end' gutter={8}>
                 <Col>
-                    <Button type='primary' onClick={this.handleSubmitAndOpen} disabled={!!uploadFileErrorMessage}>
+                    <Button
+                        className='cvat-submit-open-task-button'
+                        type='primary'
+                        onClick={this.handleSubmitAndOpen}
+                        disabled={!!uploadFileErrorMessage}
+                    >
                         Submit & Open
                     </Button>
                 </Col>
                 <Col>
-                    <Button type='primary' onClick={this.handleSubmitAndContinue} disabled={!!uploadFileErrorMessage}>
+                    <Button
+                        className='cvat-submit-open-task-button'
+                        type='primary'
+                        onClick={this.handleSubmitAndContinue}
+                        disabled={!!uploadFileErrorMessage}
+                    >
                         Submit & Continue
                     </Button>
                 </Col>
@@ -860,7 +907,7 @@ class CreateTaskContent extends React.PureComponent<Props & RouteComponentProps,
         );
     }
 
-    private renderFooterMutliTasks(): JSX.Element {
+    private renderFooterMultiTasks(): JSX.Element {
         const {
             multiTasks: items,
             uploadFileErrorMessage,
@@ -887,7 +934,13 @@ class CreateTaskContent extends React.PureComponent<Props & RouteComponentProps,
         return (
             <Row justify='end' gutter={5}>
                 <Col>
-                    <Button type='primary' onClick={this.handleSubmitMutliTasks} disabled={!!uploadFileErrorMessage}>
+                    <Button
+                        className='cvat-submit-multiple-tasks-button'
+                        htmlType='submit'
+                        type='primary'
+                        onClick={this.handleSubmitMultiTasks}
+                        disabled={!!uploadFileErrorMessage}
+                    >
                         Submit&nbsp;
                         {currentFiles.length}
                         &nbsp;tasks
@@ -914,7 +967,7 @@ class CreateTaskContent extends React.PureComponent<Props & RouteComponentProps,
                 {this.renderAdvancedBlock()}
 
                 <Col span={24} className='cvat-create-task-content-footer'>
-                    {many ? this.renderFooterMutliTasks() : this.renderFooterSingleTask() }
+                    {many ? this.renderFooterMultiTasks() : this.renderFooterSingleTask() }
                 </Col>
             </Row>
         );

@@ -1,4 +1,5 @@
 // Copyright (C) 2021-2022 Intel Corporation
+// Copyright (C) 2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
@@ -12,7 +13,6 @@ import Select from 'antd/lib/select';
 import Input from 'antd/lib/input';
 import TextArea from 'antd/lib/input/TextArea';
 import notification from 'antd/lib/notification';
-import Tooltip from 'antd/lib/tooltip';
 
 import { CombinedState, CloudStorage } from 'reducers';
 import { createCloudStorageAsync, updateCloudStorageAsync } from 'actions/cloud-storage-actions';
@@ -20,6 +20,7 @@ import { ProviderType, CredentialsType } from 'utils/enums';
 import { QuestionCircleOutlined, UploadOutlined } from '@ant-design/icons';
 import Upload, { RcFile } from 'antd/lib/upload';
 import Space from 'antd/lib/space';
+import CVATTooltip from 'components/common/cvat-tooltip';
 import { AzureProvider, S3Provider, GoogleCloudProvider } from '../../icons';
 import S3Region from './s3-region';
 import GCSLocation from './gcs-locatiion';
@@ -29,8 +30,8 @@ export interface Props {
     cloudStorage?: CloudStorage;
 }
 
-type CredentialsFormNames = 'key' | 'secret_key' | 'account_name' | 'session_token';
-type CredentialsCamelCaseNames = 'key' | 'secretKey' | 'accountName' | 'sessionToken';
+type CredentialsFormNames = 'key' | 'secret_key' | 'account_name' | 'session_token' | 'connection_string';
+type CredentialsCamelCaseNames = 'key' | 'secretKey' | 'accountName' | 'sessionToken' | 'connectionString';
 
 interface CloudStorageForm {
     credentials_type: CredentialsType;
@@ -43,6 +44,7 @@ interface CloudStorageForm {
     secret_key?: string;
     SAS_token?: string;
     key_file?: File;
+    connection_string?: string;
     description?: string;
     region?: string;
     prefix?: string;
@@ -77,12 +79,14 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
         key: 'X'.repeat(128),
         secretKey: 'X'.repeat(40),
         keyFile: new File([], 'fakeKey.json'),
+        connectionString: 'X'.repeat(400),
     };
 
     const [keyVisibility, setKeyVisibility] = useState(false);
     const [secretKeyVisibility, setSecretKeyVisibility] = useState(false);
     const [sessionTokenVisibility, setSessionTokenVisibility] = useState(false);
     const [accountNameVisibility, setAccountNameVisibility] = useState(false);
+    const [connectionStringVisibility, setConnectionStringVisibility] = useState(false);
 
     const [manifestNames, setManifestNames] = useState<string[]>([]);
 
@@ -111,6 +115,8 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
             fieldsValue.secret_key = fakeCredentialsData.secretKey;
         } else if (cloudStorage.credentialsType === CredentialsType.KEY_FILE_PATH) {
             setUploadedKeyFile(fakeCredentialsData.keyFile);
+        } else if (cloudStorage.credentialsType === CredentialsType.CONNECTION_STRING) {
+            fieldsValue.connection_string = fakeCredentialsData.connectionString;
         }
 
         if (cloudStorage.specificAttributes) {
@@ -261,6 +267,9 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
             if (cloudStorageData.session_token === fakeCredentialsData.sessionToken) {
                 delete cloudStorageData.session_token;
             }
+            if (cloudStorageData.connection_string === fakeCredentialsData.connectionString) {
+                delete cloudStorageData.connection_string;
+            }
             dispatch(updateCloudStorageAsync(cloudStorageData));
         } else {
             dispatch(createCloudStorageAsync(cloudStorageData));
@@ -313,7 +322,7 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
         className: 'cvat-cloud-storage-form-item',
     };
 
-    const credentialsBlok = (): JSX.Element => {
+    const credentialsBlok = (): JSX.Element | null => {
         const internalCommonProps = {
             ...commonProps,
             labelCol: { span: 8, offset: 2 },
@@ -324,9 +333,9 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
             return (
                 <>
                     <Form.Item
-                        label='ACCESS KEY ID'
+                        label='Access key ID'
                         name='key'
-                        rules={[{ required: true, message: 'Please, specify your access_key_id' }]}
+                        rules={[{ required: true, message: 'Please, specify your access key ID' }]}
                         {...internalCommonProps}
                     >
                         <Input.Password
@@ -338,13 +347,13 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
                         />
                     </Form.Item>
                     <Form.Item
-                        label='SECRET ACCESS KEY ID'
+                        label='Secret access key'
                         name='secret_key'
-                        rules={[{ required: true, message: 'Please, specify your secret_access_key_id' }]}
+                        rules={[{ required: true, message: 'Please, specify your secret access key' }]}
                         {...internalCommonProps}
                     >
                         <Input.Password
-                            maxLength={44}
+                            maxLength={64}
                             visibilityToggle={secretKeyVisibility}
                             onChange={() => setSecretKeyVisibility(true)}
                             onFocus={() => onFocusCredentialsItem('secretKey', 'secret_key')}
@@ -396,21 +405,36 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
 
         if (providerType === ProviderType.AZURE_CONTAINER && credentialsType === CredentialsType.ANONYMOUS_ACCESS) {
             return (
-                <>
-                    <Form.Item
-                        label='Account name'
-                        name='account_name'
-                        rules={[{ required: true, message: 'Please, specify your account name' }]}
-                        {...internalCommonProps}
-                    >
-                        <Input.Password
-                            minLength={3}
-                            maxLength={24}
-                            visibilityToggle={accountNameVisibility}
-                            onChange={() => setAccountNameVisibility(true)}
-                        />
-                    </Form.Item>
-                </>
+                <Form.Item
+                    label='Account name'
+                    name='account_name'
+                    rules={[{ required: true, message: 'Please, specify your account name' }]}
+                    {...internalCommonProps}
+                >
+                    <Input.Password
+                        minLength={3}
+                        maxLength={24}
+                        visibilityToggle={accountNameVisibility}
+                        onChange={() => setAccountNameVisibility(true)}
+                    />
+                </Form.Item>
+            );
+        }
+
+        if (providerType === ProviderType.AZURE_CONTAINER && credentialsType === CredentialsType.CONNECTION_STRING) {
+            return (
+                <Form.Item
+                    label='Connection string'
+                    name='connection_string'
+                    rules={[{ required: true, message: 'Please, specify your connection string' }]}
+                    {...internalCommonProps}
+                >
+                    <Input.Password
+                        maxLength={1024}
+                        visibilityToggle={connectionStringVisibility}
+                        onChange={() => setConnectionStringVisibility(true)}
+                    />
+                </Form.Item>
             );
         }
 
@@ -420,7 +444,7 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
                     name='key_file'
                     {...internalCommonProps}
                     label={(
-                        <Tooltip title='You can upload a key file.
+                        <CVATTooltip title='You can upload a key file.
                                 If you leave this field blank, the environment variable
                                 GOOGLE_APPLICATION_CREDENTIALS will be used.'
                         >
@@ -433,7 +457,7 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
                             >
                                 <QuestionCircleOutlined />
                             </Button>
-                        </Tooltip>
+                        </CVATTooltip>
 
                     )}
                 >
@@ -462,10 +486,10 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
             );
         }
 
-        return <></>;
+        return null;
     };
 
-    const AWSS3Configuration = (): JSX.Element => {
+    const awsS3Configuration = (): JSX.Element => {
         const internalCommonProps = {
             ...commonProps,
             labelCol: { offset: 1 },
@@ -513,7 +537,7 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
         );
     };
 
-    const AzureBlobStorageConfiguration = (): JSX.Element => {
+    const azureBlobStorageConfiguration = (): JSX.Element => {
         const internalCommonProps = {
             ...commonProps,
             labelCol: { offset: 1 },
@@ -541,6 +565,7 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
                             Account name and SAS token
                         </Select.Option>
                         <Select.Option value={CredentialsType.ANONYMOUS_ACCESS}>Anonymous access</Select.Option>
+                        <Select.Option value={CredentialsType.CONNECTION_STRING}>Connection string</Select.Option>
                     </Select>
                 </Form.Item>
 
@@ -549,7 +574,7 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
         );
     };
 
-    const GoogleCloudStorageConfiguration = (): JSX.Element => {
+    const googleCloudStorageConfiguration = (): JSX.Element => {
         const internalCommonProps = {
             ...commonProps,
             labelCol: { span: 6, offset: 1 },
@@ -581,13 +606,6 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
                     </Select>
                 </Form.Item>
                 {credentialsBlok()}
-                <Form.Item
-                    label='Prefix'
-                    name='prefix'
-                    {...internalCommonProps}
-                >
-                    <Input />
-                </Form.Item>
                 <Form.Item
                     label='Project ID'
                     name='project_id'
@@ -656,9 +674,20 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
                     </Select.Option>
                 </Select>
             </Form.Item>
-            {providerType === ProviderType.AWS_S3_BUCKET && AWSS3Configuration()}
-            {providerType === ProviderType.AZURE_CONTAINER && AzureBlobStorageConfiguration()}
-            {providerType === ProviderType.GOOGLE_CLOUD_STORAGE && GoogleCloudStorageConfiguration()}
+            {providerType === ProviderType.AWS_S3_BUCKET && awsS3Configuration()}
+            {providerType === ProviderType.AZURE_CONTAINER && azureBlobStorageConfiguration()}
+            {providerType === ProviderType.GOOGLE_CLOUD_STORAGE && googleCloudStorageConfiguration()}
+            <Form.Item
+                label={(
+                    <CVATTooltip title='Prefix is used to filter bucket content'>
+                        Prefix
+                        <QuestionCircleOutlined className='cvat-cloud-storage-help-button' />
+                    </CVATTooltip>
+                )}
+                name='prefix'
+            >
+                <Input />
+            </Form.Item>
             <ManifestsManager form={form} manifestNames={manifestNames} setManifestNames={setManifestNames} />
             <Row justify='end'>
                 <Col>

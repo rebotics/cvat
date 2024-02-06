@@ -1,4 +1,5 @@
 # Copyright (C) 2021-2022 Intel Corporation
+# Copyright (C) 2022 CVAT.ai Corporation
 #
 # SPDX-License-Identifier: MIT
 
@@ -7,17 +8,34 @@ from rest_framework import status
 from rest_framework.test import APITestCase, APIClient
 from rest_framework.authtoken.models import Token
 from django.test import override_settings
-from cvat.apps.iam.urls import urlpatterns as iam_url_patterns
 from django.urls import path, re_path
-from allauth.account.views import ConfirmEmailView, EmailVerificationSentView
+from allauth.account.views import EmailVerificationSentView
+
+from cvat.apps.iam.urls import urlpatterns as iam_url_patterns
+from cvat.apps.iam.views import ConfirmEmailViewEx
 
 
 urlpatterns = iam_url_patterns + [
-    re_path(r'^account-confirm-email/(?P<key>[-:\w]+)/$', ConfirmEmailView.as_view(),
+    re_path(r'^account-confirm-email/(?P<key>[-:\w]+)/$', ConfirmEmailViewEx.as_view(),
             name='account_confirm_email'),
     path('register/account-email-verification-sent', EmailVerificationSentView.as_view(),
          name='account_email_verification_sent'),
 ]
+
+class ForceLogin:
+    def __init__(self, user, client):
+        self.user = user
+        self.client = client
+
+    def __enter__(self):
+        if self.user:
+            self.client.force_login(self.user, backend='django.contrib.auth.backends.ModelBackend')
+
+        return self
+
+    def __exit__(self, exception_type, exception_value, traceback):
+        if self.user:
+            self.client.logout()
 
 class UserRegisterAPITestCase(APITestCase):
 
@@ -72,3 +90,4 @@ class UserRegisterAPITestCase(APITestCase):
         self._check_response(response, {'first_name': 'test_first', 'last_name': 'test_last',
                                         'username': 'test_username', 'email': 'test_email@test.com',
                                         'email_verification_required': True, 'key': None})
+
