@@ -29,7 +29,6 @@ from cvat.apps.dataset_manager.bindings import (ProjectData, CommonData,
                                                 match_dm_item)
 from cvat.apps.dataset_manager.util import make_zip_archive
 from cvat.apps.engine.frame_provider import FrameProvider
-from cvat.apps.engine.constants import FrameType, FrameQuality
 
 from .registry import dm_env, exporter, importer
 
