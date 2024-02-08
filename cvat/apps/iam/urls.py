@@ -23,13 +23,7 @@ urlpatterns = [
     path('rules', RulesView.as_view(), name='rules'),
 ]
 
-registrationEnabled = False
-
 if settings.IAM_TYPE == 'BASIC':
-    if registrationEnabled:
-        urlpatterns += [
-            path('register', RegisterViewEx.as_view(), name='rest_register'),
-        ]
     urlpatterns += [
         # password
         path('password/reset', PasswordResetView.as_view(),
