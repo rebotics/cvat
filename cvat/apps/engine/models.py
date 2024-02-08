@@ -27,7 +27,6 @@ from cvat.apps.engine.utils import parse_specific_attributes
 from cvat.apps.organizations.models import Organization
 from cvat.apps.events.utils import cache_deleted
 from cvat.rebotics.storage import CustomAWSMediaStorage
-from cvat.apps.engine.constants import FrameQuality
 
 
 class SafeCharField(models.CharField):
@@ -267,13 +266,6 @@ class Data(models.Model):
     class Meta:
         default_permissions = ()
 
-    upload_dirname = 'raw'
-    compressed_cache_dirname = 'compressed'
-    original_cache_dirname = 'original'
-    preview_file_name = 'preview.jpeg'
-    manifest_file_name = 'manifest.jsonl'
-    index_file_name = 'index.json'
-
     def get_frame_step(self):
         match = re.search(r"step\s*=\s*([1-9]\d*)", self.frame_filter)
         return int(match.group(1)) if match else 1
@@ -285,13 +277,13 @@ class Data(models.Model):
         return os.path.join(settings.MEDIA_DATA_ROOT, str(self.id))
 
     def get_upload_dirname(self):
-        return os.path.join(self.get_data_dirname(), self.upload_dirname)
+        return os.path.join(self.get_data_dirname(), "raw")
 
     def get_compressed_cache_dirname(self):
-        return os.path.join(self.get_data_dirname(), self.compressed_cache_dirname)
+        return os.path.join(self.get_data_dirname(), "compressed")
 
     def get_original_cache_dirname(self):
-        return os.path.join(self.get_data_dirname(), self.original_cache_dirname)
+        return os.path.join(self.get_data_dirname(), "original")
 
     @staticmethod
     def _get_chunk_name(chunk_number, chunk_type):
@@ -318,19 +310,11 @@ class Data(models.Model):
         return os.path.join(self.get_compressed_cache_dirname(),
                             self._get_compressed_chunk_name(chunk_number))
 
-    def get_chunk_path(self, chunk_number, quality):
-        if quality == FrameQuality.ORIGINAL:
-            return self.get_original_chunk_path(chunk_number)
-        elif quality == FrameQuality.COMPRESSED:
-            return self.get_compressed_chunk_path(chunk_number)
-        else:
-            raise ValueError('Invalid quality value: {}'.format(quality.value))
-
     def get_manifest_path(self):
-        return os.path.join(self.get_upload_dirname(), self.manifest_file_name)
+        return os.path.join(self.get_upload_dirname(), 'manifest.jsonl')
 
     def get_index_path(self):
-        return os.path.join(self.get_upload_dirname(), self.index_file_name)
+        return os.path.join(self.get_upload_dirname(), 'index.json')
 
     def make_dirs(self):
         data_path = self.get_data_dirname()
@@ -350,16 +334,16 @@ class Data(models.Model):
         return os.path.join(settings.S3_CACHE_ROOT, str(self.pk))
 
     def get_s3_upload_dirname(self):
-        return os.path.join(self.get_s3_data_dirname(), self.upload_dirname)
+        return os.path.join(self.get_s3_data_dirname(), 'raw')
 
     def get_s3_uploaded_file_path(self, file_name):
         return os.path.join(self.get_s3_upload_dirname(), file_name)
 
     def get_s3_compressed_cache_dirname(self):
-        return os.path.join(self.get_s3_cache_base_dirname(), self.compressed_cache_dirname)
+        return os.path.join(self.get_s3_cache_base_dirname(), 'compressed')
 
     def get_s3_original_cache_dirname(self):
-        return os.path.join(self.get_s3_cache_base_dirname(), self.original_cache_dirname)
+        return os.path.join(self.get_s3_cache_base_dirname(), 'original')
 
     def get_s3_original_chunk_path(self, chunk_number):
         return os.path.join(self.get_s3_original_cache_dirname(),
@@ -370,18 +354,19 @@ class Data(models.Model):
                             self._get_compressed_chunk_name(chunk_number))
 
     def get_s3_chunk_path(self, chunk_number, quality):
-        if quality == FrameQuality.ORIGINAL:
+        # .frame_provider.FrameProvider.Quality
+        if quality == 100:
             return self.get_s3_original_chunk_path(chunk_number)
-        elif quality == FrameQuality.COMPRESSED:
+        elif quality == 0:
             return self.get_s3_compressed_chunk_path(chunk_number)
         else:
             raise ValueError('Invalid quality value: {}'.format(quality.value))
 
-    def get_s3_preview_path(self):
-        return os.path.join(self.get_s3_data_dirname(), self.preview_file_name)
-
     def get_s3_manifest_path(self):
-        return os.path.join(self.get_s3_upload_dirname(), self.manifest_file_name)
+        return os.path.join(self.get_s3_upload_dirname(), 'manifest.jsonl')
+
+    def get_s3_index_path(self):
+        return os.path.join(self.get_s3_upload_dirname(), 'index.json')
 
 
 class Video(models.Model):
