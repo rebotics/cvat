@@ -44,192 +44,6 @@ from utils.dataset_manifest import CachedIndexManifestManager, clean_filenames
 
 slogger = ServerLogManager(__name__)
 
-############################# Utility functions
-
-def fix_filename(filename, file_path, db_file):
-    name, ext = os.path.splitext(filename)
-
-    guess_ext = imghdr.what(file_path)
-    if guess_ext is not None:
-        guess_ext = '.' + guess_ext
-        if guess_ext != ext:
-            ext = guess_ext
-
-    if db_file.meta is not None:
-        scan_id = db_file.meta.get('processing_action_id')
-        if scan_id is not None:
-            name = f'scan_{scan_id}_{name}'
-
-    return f'{name}{ext}'
-
-
-def _check_filename_collisions(name, files, rename_files):
-    if name in files:
-        if rename_files:
-            name, ext = os.path.splitext(name)
-            i = 1
-            new_name = f'{name}_{i}{ext}'
-            while new_name in files:
-                i += 1
-                new_name = f'{name}_{i}{ext}'
-            name = new_name
-        else:
-            raise Exception("filename collision: {}".format(name))
-    return name
-
-
-def retry(func: Callable, args=None, kwargs=None,
-          exc_types=None, times=1, delay=0, factor=1):
-    if args is None:
-        args = ()
-    if kwargs is None:
-        kwargs = {}
-    if exc_types is None:
-        exc_types = (Exception, )
-    if times < 1:
-        times = 1
-    if delay < 0:
-        delay = 0
-    if factor < 0:
-        factor = 0
-
-    try:
-        return func(*args, **kwargs)
-    except exc_types as e:
-        exc = e
-    times -= 1
-
-    while times > 0:
-        time.sleep(delay)
-        try:
-            return func(*args, **kwargs)
-        except exc_types as e:
-            exc = e
-        times -= 1
-        delay *= factor
-
-    raise exc
-
-def _move_manifest_to_s3(db_data: models.Data):
-    path = db_data.get_manifest_path()
-    key = db_data.get_s3_manifest_path()
-    # to match names from django storage.
-    clean_filenames(path)
-    slogger.glob.info('{} -> {}'.format(path, key))
-    s3_client.upload_from_path(path, key)
-    os.remove(path)
-
-
-def _move_file_to_s3(path, db_data, meta):
-    if os.path.exists(path):
-        slogger.glob.info(path)
-        name = path.rsplit('/', 1)[-1]
-        with open(path, 'rb') as f:
-            models.S3File.objects.create(
-                file=File(f, name=name),
-                data=db_data,
-                meta=meta,
-            )
-        os.remove(path)
-
-
-def _move_preview_to_s3(path, key):
-    slogger.glob.info('{} -> {}'.format(path, key))
-    s3_client.upload_from_path(path, key)
-    os.remove(path)
-
-
-def _move_client_files_to_s3(db_data: models.Data):
-    client_files = db_data.client_files.all()
-    for client_file in client_files:
-        path = client_file.file.path
-        _move_file_to_s3(path, db_data, client_file.meta)
-    client_files.delete()
-
-
-def _move_remote_files_to_s3(db_data: models.Data):
-    upload_dirname = db_data.get_upload_dirname()
-    remote_files = db_data.remote_files.all()
-    for remote_file in remote_files:
-        path = os.path.join(upload_dirname, remote_file.meta['name'])
-        _move_file_to_s3(path, db_data, remote_file.meta)
-    remote_files.delete()
-
-
-def _move_task_preview_to_s3(db_data: models.Data):
-    path = db_data.get_preview_path()
-    key = db_data.get_s3_preview_path()
-    _move_preview_to_s3(path, key)
-
-
-def _move_job_previews_to_s3(db_task: models.Task, db_data: models.Data):
-    db_jobs = models.Job.objects.filter(segment__task=db_task)
-    for db_job in db_jobs:
-        path = db_job.get_preview_path()
-        key = db_job.get_s3_preview_path(data=db_data)
-        _move_preview_to_s3(path, key)
-        shutil.rmtree(db_job.get_dirname())
-
-
-def _move_data_to_s3(db_task: models.Task, db_data: models.Data):
-    # This does not apply to video, cloud storages or share uploads.
-    slogger.glob.info('Moving files to s3 for data {}:'.format(db_data.id))
-    _move_manifest_to_s3(db_data)
-    _move_client_files_to_s3(db_data)
-    _move_remote_files_to_s3(db_data)
-    _move_task_preview_to_s3(db_data)
-    _move_job_previews_to_s3(db_task, db_data)
-    shutil.rmtree(db_data.get_data_dirname())
-    slogger.glob.info('Done.')
-
-def _download_s3_files(db_data: models.Data, upload_dir, rename_files=False):
-    job = rq.get_current_job()
-    local_files = {}
-    s3_files = db_data.s3_files.all()
-
-    for file in s3_files:
-        url = file.file.url
-        name = os.path.basename(file.file.name)
-        # _validate_url(url)  // TODO
-        slogger.glob.info("Downloading from s3: {}".format(name))
-        job.meta['status'] = 'S3 {} is  being downloaded...'.format(url)
-        job.save_meta()
-
-        response = retry(requests.get, args=(url,), kwargs={'stream': True, 'timeout': 30}, times=5, delay=5, factor=2)
-        if response.status_code == 200:
-            response.raw.decode_content = True
-            output_path = os.path.join(upload_dir, name)
-            with open(output_path, 'wb') as output_file:
-                shutil.copyfileobj(response.raw, output_file)
-
-            new_name = fix_filename(name, output_path, file)
-            new_name = _check_filename_collisions(new_name, local_files, rename_files)
-            if new_name != name:
-                new_path = os.path.join(upload_dir, new_name)
-                os.rename(output_path, new_path)
-
-                rel_path = os.path.relpath(new_path, settings.BASE_DIR)
-                with open(rel_path, 'rb') as f:
-                    models.S3File.objects.create(
-                        data=db_data,
-                        file=File(f, name=new_name),
-                    )
-                try:
-                    file.file.delete()
-                except Exception as e:
-                    slogger.glob(f'Failed to delete s3 file {name} with pk {file.pk}.'
-                                 f' {type(e).__name__}: {e}'
-                                 f' Proceeding without deletion.')
-                file.delete()
-        else:
-            slogger.glob.error(f'Failed to download {url}')
-            slogger.glob.error(f'Status: {response.status_code}')
-            slogger.glob.error(response.text)
-            raise Exception("Failed to download " + url)
-
-        local_files[new_name] = new_name
-    return list(local_files.values())
-
 ############################# Low Level server API
 
 def create(db_task, data, request):
@@ -686,6 +500,7 @@ def _create_task_manifest_from_cloud_data(
     content = cloud_storage_instance.bulk_download_to_memory(sorted_media)
     manifest.link(sources=content, DIM_3D=dimension == models.DimensionType.DIM_3D)
     manifest.create()
+
 def _create_noatomic(
     db_task: Union[int, models.Task],
     data: Dict[str, Any],
@@ -1333,6 +1148,158 @@ def _create_noatomic(
 
 
 @transaction.atomic
-def _create_thread(db_task, data, isBackupRestore=False, isDatasetImport=False, rename_files=False):
-    _create_noatomic(db_task, data, isBackupRestore=isBackupRestore,
-                     isDatasetImport=isDatasetImport, rename_files=rename_files)
+def _create_thread(db_task, data, isBackupRestore=False, isDatasetImport=False):
+    _create_noatomic(db_task, data, isBackupRestore=isBackupRestore, isDatasetImport=isDatasetImport)
+
+
+############################# Utility functions
+
+
+def fix_filename(filename, file_path, db_file):
+    name, ext = os.path.splitext(filename)
+
+    guess_ext = imghdr.what(file_path)
+    if guess_ext is not None:
+        guess_ext = '.' + guess_ext
+        if guess_ext != ext:
+            ext = guess_ext
+
+    if db_file.meta is not None:
+        scan_id = db_file.meta.get('processing_action_id')
+        if scan_id is not None:
+            name = f'scan_{scan_id}_{name}'
+
+    return f'{name}{ext}'
+
+
+def retry(func: Callable, args=None, kwargs=None,
+          exc_types=None, times=1, delay=0, factor=1):
+    if args is None:
+        args = ()
+    if kwargs is None:
+        kwargs = {}
+    if exc_types is None:
+        exc_types = (Exception, )
+    if times < 1:
+        times = 1
+    if delay < 0:
+        delay = 0
+    if factor < 0:
+        factor = 0
+
+    try:
+        return func(*args, **kwargs)
+    except exc_types as e:
+        exc = e
+    times -= 1
+
+    while times > 0:
+        time.sleep(delay)
+        try:
+            return func(*args, **kwargs)
+        except exc_types as e:
+            exc = e
+        times -= 1
+        delay *= factor
+
+    raise exc
+
+
+def _move_manifest_to_s3(db_data: models.Data):
+    path = db_data.get_manifest_path()
+    key = db_data.get_s3_manifest_path()
+    # to match names from django storage.
+    clean_filenames(path)
+    slogger.glob.info('{} -> {}'.format(path, key))
+    s3_client.upload_from_path(path, key)
+    os.remove(path)
+
+
+def _move_file_to_s3(path, db_data, meta):
+    if os.path.exists(path):
+        slogger.glob.info(path)
+        name = path.rsplit('/', 1)[-1]
+        with open(path, 'rb') as f:
+            models.S3File.objects.create(
+                file=File(f, name=name),
+                data=db_data,
+                meta=meta,
+            )
+        os.remove(path)
+
+
+def _move_client_files_to_s3(db_data: models.Data):
+    client_files = db_data.client_files.all()
+    for client_file in client_files:
+        path = client_file.file.path
+        _move_file_to_s3(path, db_data, client_file.meta)
+    client_files.delete()
+
+
+def _move_remote_files_to_s3(db_data: models.Data):
+    upload_dirname = db_data.get_upload_dirname()
+    remote_files = db_data.remote_files.all()
+    for remote_file in remote_files:
+        path = os.path.join(upload_dirname, remote_file.meta['name'])
+        _move_file_to_s3(path, db_data, remote_file.meta)
+    remote_files.delete()
+
+
+def _move_data_to_s3(db_task: models.Task, db_data: models.Data):
+    # This does not apply to video, cloud storages or share uploads.
+    slogger.glob.info('Moving files to s3 for data {}:'.format(db_data.id))
+    _move_manifest_to_s3(db_data)
+    _move_client_files_to_s3(db_data)
+    _move_remote_files_to_s3(db_data)
+    shutil.rmtree(db_data.get_data_dirname())
+    slogger.glob.info('Done.')
+
+
+def _download_s3_files(db_data: models.Data, upload_dir):
+    job = rq.get_current_job()
+    local_files = {}
+    s3_files = db_data.s3_files.all()
+
+    for file in s3_files:
+        url = file.file.url
+        name = os.path.basename(file.file.name)
+        if name in local_files:
+            raise Exception("Filename collision: {}".format(name))
+        _validate_scheme(url)
+        slogger.glob.info("Downloading from s3: {}".format(name))
+        job.meta['status'] = 'S3 {} is  being downloaded...'.format(url)
+        job.save_meta()
+
+        response = retry(requests.get, args=(url,), kwargs={'stream': True, 'timeout': 30}, times=5, delay=5, factor=2)
+        if response.status_code == 200:
+            response.raw.decode_content = True
+            output_path = os.path.join(upload_dir, name)
+            with open(output_path, 'wb') as output_file:
+                shutil.copyfileobj(response.raw, output_file)
+
+            new_name = fix_filename(name, output_path, file)
+            if new_name != name:
+                new_path = os.path.join(upload_dir, new_name)
+                os.rename(output_path, new_path)
+
+                rel_path = os.path.relpath(new_path, settings.BASE_DIR)
+                with open(rel_path, 'rb') as f:
+                    models.S3File.objects.create(
+                        data=db_data,
+                        file=File(f, name=new_name),
+                    )
+                try:
+                    file.file.delete()
+                except Exception as e:
+                    slogger.glob(f'Failed to delete s3 file {name} with pk {file.pk}.'
+                                 f' {type(e).__name__}: {e}'
+                                 f' Proceeding without deletion.')
+                file.delete()
+        else:
+            slogger.glob.error(f'Failed to download {url}')
+            slogger.glob.error(f'Status: {response.status_code}')
+            slogger.glob.error(response.text)
+            raise Exception("Failed to download " + url)
+
+        local_files[name] = new_name
+    return list(local_files.values())

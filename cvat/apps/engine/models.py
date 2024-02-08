@@ -365,9 +365,6 @@ class Data(models.Model):
     def get_s3_manifest_path(self):
         return os.path.join(self.get_s3_upload_dirname(), 'manifest.jsonl')
 
-    def get_s3_index_path(self):
-        return os.path.join(self.get_s3_upload_dirname(), 'index.json')
-
 
 class Video(models.Model):
     data = models.OneToOneField(Data, on_delete=models.CASCADE, related_name="video", null=True)
@@ -828,13 +825,6 @@ class Job(models.Model):
         task = self.segment.task
         project = task.project
         return project.get_labels() if project else task.get_labels()
-
-    def get_s3_preview_path(self, data: Data = None):
-        # TODO: get_preview_path is removed, do I need it?
-        if data is None:
-            data = self.segment.task.data
-        return os.path.join(data.get_s3_data_dirname(), 'jobs',
-                            str(self.pk), self.preview_file_name)
 
     class Meta:
         default_permissions = ()
