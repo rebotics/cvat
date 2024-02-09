@@ -16,7 +16,7 @@ services:
         aliases:
           - postgres
     ports:
-      - 5438:5432
+      - "5438:5432"
 
   cvat_redis:
     container_name: reb_cvat_redis
@@ -26,6 +26,8 @@ services:
       reb_cvat:
         aliases:
           - redis
+    ports:
+      - "6385:6379"
 
   cvat_server:
     container_name: reb_cvat
@@ -58,6 +60,8 @@ services:
       reb_cvat:
         aliases:
           - opa
+    ports:
+      - "8181:8181"
 
   cvat_minio:
     container_name: reb_cvat_minio
@@ -75,7 +79,7 @@ services:
         aliases:
           - minio
     ports:
-      - 9006:9006
+      - "9006:9006"
 
 volumes:
   reb_cvat_db:

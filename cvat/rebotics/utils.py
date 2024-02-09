@@ -1,7 +1,6 @@
-from enum import Enum
 from django.conf import settings
 from django.db import models
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
 
 
 class InjectionError(AttributeError):
@@ -15,7 +14,7 @@ def injected_property(name: str, error_message: str = None):
     """
     def inner(cls):
         if name.startswith('_'):
-            raise ValueError('Name should not be protected, private or magic.')
+            raise ValueError('Name should not be _protected, __private or __magic__.')
 
         private_name = '_{}'.format(name)
         message = error_message
@@ -46,17 +45,6 @@ def injected_property(name: str, error_message: str = None):
     return inner
 
 
-class ChoicesEnum(Enum):
-    @classmethod
-    def choices(cls):
-        return (x.value for x in cls)
-
-
-class StrEnum(str, Enum):
-    def __str__(self):
-        return self.value
-
-
 def setting(name, default=None):
     # obtain settings which may be not initialized.
     return getattr(settings, name, default)
@@ -77,12 +65,3 @@ class DateAwareModel(models.Model):
     @property
     def date_modified_display(self):
         return self.date_modified.strftime(self.date_display_format)
-
-
-def fix_between(value, min, max):
-    """fixes a value between min and max"""
-    if value < min:
-        return min
-    if value > max:
-        return max
-    return value

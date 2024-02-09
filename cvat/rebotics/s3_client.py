@@ -1,8 +1,8 @@
 import os
 import requests
 from typing import Union
-from io import BytesIO, IOBase
-from tempfile import SpooledTemporaryFile, NamedTemporaryFile
+from io import BytesIO, IOBase, TextIOBase
+from tempfile import NamedTemporaryFile
 from cvat.rebotics.utils import setting
 
 import boto3
@@ -38,10 +38,11 @@ class S3Client:
 
     def upload_from_io(self, io: IOBase, key: str) -> bool:
         io.seek(0)
-        with SpooledTemporaryFile() as tmp:
-            tmp.write(io.read())
-            tmp.seek(0)
-            response = self._client.upload_fileobj(tmp, self.bucket, self._key(key))
+        if isinstance(io, TextIOBase):
+            with BytesIO(io.read().encode('utf-8')) as bin_io:
+                response = self._client.upload_fileobj(bin_io, self.bucket, self._key(key))
+        else:
+            response = self._client.upload_fileobj(io, self.bucket, self._key(key))
         return response
 
     def download_to_path(self, key: str, path: str) -> None:
@@ -99,7 +100,7 @@ class S3Client:
             raise S3ClientError('Failed to post io to s3: {}'.format(response.content))
 
     def delete_object(self, key: str) -> bool:
-        return self._client.delete_object(self.bucket, self._key(key))
+        return self._client.delete_object(Bucket=self.bucket, Key=self._key(key))
 
     def set_tags(self, key: str, tags: dict) -> dict:
         return self._client.put_object_tagging(Bucket=self.bucket, Key=self._key(key), Tagging={
