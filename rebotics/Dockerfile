@@ -80,7 +80,6 @@ RUN --mount=type=cache,target=/root/.cache/pip/http \
     DATUMARO_HEADLESS=1 python3 -m pip wheel --no-deps \
     -r /tmp/cvat/requirements/${CVAT_CONFIGURATION}.txt \
     -r /tmp/rebotics/requirements.txt \
-    -r /tmp \
     -w /tmp/wheelhouse
 
 FROM golang:1.20.5 AS build-smokescreen

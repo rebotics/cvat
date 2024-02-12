@@ -19,7 +19,7 @@ fi
 for service in $BUILD; do
   case $service in
     "cvat")
-      docker build -f rebotics/Dockerfile -t retechlabs/rebotics-cvat:${VERSION} .
+      DOCKER_BUILDKIT=1 docker build -f rebotics/Dockerfile -t retechlabs/rebotics-cvat:${VERSION} .
       ;;
     "opa")
       OPA_VERSION=0.34.2-rootless  # fixed, rarely changes
