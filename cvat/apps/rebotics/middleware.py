@@ -4,8 +4,6 @@ from django.http.request import validate_host, split_domain_port
 from django.http.response import HttpResponseBadRequest
 from django.conf import settings
 
-from cvat.apps.engine.log import slogger
-
 
 class SubnetCheckError(Exception):
     pass

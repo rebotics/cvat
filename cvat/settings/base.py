@@ -711,7 +711,10 @@ from cvat.rq_patching import update_started_job_registry_cleanup
 update_started_job_registry_cleanup()
 
 
-#### REBOTICS Overrides. TODO: move to separate file and import
+####################################
+#  Rebotics extras and overrides.  #
+####################################
+
 # Rebotics info settings
 home = os.getenv('HOME')
 version_file = os.path.join(home, 'static-ui', 'version.txt')
@@ -797,24 +800,82 @@ S3_CACHE_ROOT = 'cache'
 
 IMPORT_WORKSPACE = os.getenv('IMPORT_WORKSPACE', 'RetechLabs')
 
-##### old one
-# USE_CACHE = bool(int(os.getenv('USE_CACHE', 1)))
-# CACHE_EXPIRE = int(os.getenv('CACHE_EXPIRE', 7 * 24 * 60 * 60))  # week in seconds
-#
-# CACHES = {
-#     'default': {
-#         "BACKEND": "django_redis.cache.RedisCache",
-#         "LOCATION": REDIS_URL,
-#         "OPTIONS": {
-#             "CLIENT_CLASS": "django_redis.client.DefaultClient",
-#         }
-#     },
-# }
-#
+CACHE_EXPIRE = int(os.getenv('CACHE_EXPIRE', 7 * 24 * 60 * 60))  # week in seconds
+
+# override
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', None)
+if SECRET_KEY is None:
+    raise ValueError('Please, set DJANGO_SECRET_KEY env variable!')
+
+REDIS_URL = os.getenv('REDIS_URL')
+if not REDIS_URL:
+    redis_host = os.getenv('CVAT_REDIS_HOST', 'cvat_redis')
+    redis_port = os.getenv('CVAT_REDIS_PORT', 6379)
+    redis_db = os.getenv('CVAT_REDIS_DB', 0)
+    REDIS_URL = f'redis://{redis_host}:{redis_port}/{redis_db}'
+
+# override
+CACHES['media']['LOCATION'] = REDIS_URL
+CACHES['default'] = CACHES['media']
+
 # For fixing CSRF error. Does not support wildcard - *.
 # Forwarded host could solve it, but it's not supported by aws.
-# CSRF_TRUSTED_ORIGINS = [f'{env}-cvat.rebotics.{tld}' for env, tld in (
-#     ('r3dev', 'net'),
-#     ('r3us', 'net'),
-#     ('r3cn', 'cn'),
-# )]
+CSRF_TRUSTED_ORIGINS = [f'{env}-cvat.rebotics.{tld}' for env, tld in (
+    ('r3dev', 'net'),
+    ('r3us', 'net'),
+    ('r3cn', 'cn'),
+)]
+
+PUBLIC_DOMAIN_NAME = os.environ.get('PUBLIC_DOMAIN_NAME')
+if PUBLIC_DOMAIN_NAME:
+    ALLOWED_HOSTS += [PUBLIC_DOMAIN_NAME]
+
+for default in ['localhost', '127.0.0.1']:
+    if default not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(default)
+
+# For subnet checking middleware
+ALLOWED_SUBNETS = ALLOWED_HOSTS
+ALLOWED_HOSTS = ['*']
+
+for queue in RQ_QUEUES:
+    for key in 'HOST', 'PORT', 'PASSWORD':
+        queue.pop('key')
+    queue['URL'] = REDIS_URL
+
+DB_URL = os.getenv('DB_URL')
+if DB_URL:
+    match = re.match(r'^(?P<protocol>postgres(?:ql)?)://'
+                     r'(?:(?P<user>.+?)(?::(?P<password>.+?))?@)?'
+                     r'(?:(?P<host>.+?)(?::(?P<port>.+?))?)?'
+                     r'(?:/(?P<name>.+?))?'
+                     r'(?:\?(?P<params>.+?))?$', DB_URL)
+    if match:
+        for key in ('user', 'password', 'host', 'name'):
+            if match[key]:
+                DATABASES['default'][key.upper()] = match[key]
+        if match['port']:
+            DATABASES['default']['PORT'] = int(match['port'])
+    else:
+        raise ValueError("Url is not valid.")
+
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+INSTALLED_APPS.append('cvat.apps.rebotics')
+
+MIDDLEWARE.insert(1, 'cvat.apps.rebotics.middleware.subnet_hosts_middleware')
+
+IAM_OPA_HOST = os.getenv('OPA_URL')
+if not IAM_OPA_HOST:
+    opa_protocol = os.getenv('CVAT_OPA_PROTOCOL', 'http')
+    opa_host = os.getenv('CVAT_OPA_HOST', 'opa')
+    opa_port = int(os.getenv('CVAT_OPA_PORT', 8181))
+    IAM_OPA_HOST = f'{opa_protocol}://{opa_host}:{opa_port}'
+IAM_OPA_DATA_URL = f'{IAM_OPA_HOST}/v1/data'
+
+LOGGING['root']['handlers'] = ['console']
+
+# TODO: check, why?
+# STATIC_ROOT = os.path.join(BASE_DIR, 'static', 'static')
+
+# TODO: update SPECTACULAR_SETTINGS
