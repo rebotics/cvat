@@ -15,10 +15,12 @@ from cvat.apps.engine.models import Project, Task, Data, Job, RemoteFile, \
 from cvat.apps.organizations.models import Organization
 from cvat.apps.engine.views import TaskViewSet
 from cvat.apps.engine.media_extractors import sort
-from cvat.apps.engine.log import slogger
+from cvat.apps.engine.log import ServerLogManager
 from cvat.rebotics.s3_client import s3_client
 
 from utils.dataset_manifest import S3ManifestManager
+
+slogger = ServerLogManager(__name__)
 
 User = get_user_model()
 
