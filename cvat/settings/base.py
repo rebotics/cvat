@@ -820,7 +820,7 @@ CACHES['default'] = CACHES['media']
 
 # For fixing CSRF error. Does not support wildcard - *.
 # Forwarded host could solve it, but it's not supported by aws.
-CSRF_TRUSTED_ORIGINS = [f'{env}-cvat.rebotics.{tld}' for env, tld in (
+CSRF_TRUSTED_ORIGINS = [f'https://{env}-cvat.rebotics.{tld}' for env, tld in (
     ('r3dev', 'net'),
     ('r3us', 'net'),
     ('r3cn', 'cn'),
@@ -840,8 +840,8 @@ ALLOWED_HOSTS = ['*']
 
 for queue in RQ_QUEUES:
     for key in 'HOST', 'PORT', 'PASSWORD':
-        queue.pop('key')
-    queue['URL'] = REDIS_URL
+        RQ_QUEUES[queue].pop(key)
+    RQ_QUEUES[queue]['URL'] = REDIS_URL
 
 DB_URL = os.getenv('DB_URL')
 if DB_URL:

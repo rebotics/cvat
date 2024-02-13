@@ -222,12 +222,14 @@ COPY --chown=${USER} rqscheduler.py ${HOME}
 # Install UI
 COPY --from=cvat-ui --chown=${USER} /tmp/cvat-ui/dist ${HOME}/static-ui
 RUN sed -i -E "s#(<\!doctype html>)#{% load static %}\1#g" ${HOME}/static-ui/index.html && \
-    sed -i -E "s#\"/(assets/.*)\"#\"{% static \"\1\" %}\"#g" ${HOME}/static-ui/index.html && \
+    perl -pe "s#\"/(assets/.*?)\"#\"{% static \"\1\" %}\"#g" -i ${HOME}/static-ui/index.html \
     mkdir -p ${HOME}/cvat/apps/rebotics/templates && \
     mv ${HOME}/static-ui/index.html ${HOME}/cvat/apps/rebotics/templates
 
-# Override supervisor
+# Override supervisor / nginx configs and some scripts
 COPY --chown=${USER} rebotics/supervisord.conf ${HOME}/supervisord/all.conf
+COPY --chown=${USER} rebotics/backend_entrypoint.sh rebotics/wait_for_deps.sh ${HOME}/
+COPY rebotics/nginx.conf /etc/nginx/nginx.conf
 
 # Add version file
 COPY --chown=${USER} VERSION ${HOME}/static-ui/version.txt

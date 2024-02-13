@@ -27,8 +27,7 @@ router.register('guides', views.AnnotationGuidesViewSet)
 
 urlpatterns = [
     # Entry point for a client
-    path('', RedirectView.as_view(url=settings.UI_URL, permanent=True,
-         query_string=True)),
+    # replaced with custom index.
 
     # documentation for API
     path('api/schema/', SpectacularAPIView.as_view(
