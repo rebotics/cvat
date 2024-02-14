@@ -644,7 +644,7 @@ class ServerProxy {
                                 if (status === 202 || (isCloudStorage && status === 201)) {
                                     setTimeout(request, 3000);
                                 } else if (status === 201) {
-                                    resolve(`${baseURL}?${new URLSearchParams(params).toString()}`);
+                                    resolve(response.data.url);
                                 } else if (isCloudStorage && status === 200) {
                                     resolve();
                                 }

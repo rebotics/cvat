@@ -2382,41 +2382,46 @@ def _export_annotations(db_instance, rq_id, request, format_name, action, callba
         else:
             if rq_job.is_finished:
                 file_path = rq_job.return_value
-                if action == "download" and osp.exists(file_path):
-                    rq_job.delete()
-
-                    timestamp = datetime.strftime(last_instance_update_time,
-                        "%Y_%m_%d_%H_%M_%S")
-                    filename = filename or \
-                        "{}_{}-{}-{}{}".format(
-                            db_instance.__class__.__name__.lower(),
-                            db_instance.name if isinstance(db_instance, (Task, Project)) else db_instance.id,
-                            timestamp, format_name, osp.splitext(file_path)[1]
-                        ).lower()
-
-                    # save annotation to specified location
-                    location = location_conf.get('location')
-                    if location == Location.LOCAL:
-                        return sendfile(request, file_path, attachment=True,
-                            attachment_filename=filename)
-                    elif location == Location.CLOUD_STORAGE:
-                        try:
-                            storage_id = location_conf['storage_id']
-                        except KeyError:
-                            return HttpResponseBadRequest(
-                                'Cloud storage location was selected for destination'
-                                ' but cloud storage id was not specified')
-
-                        db_storage = get_object_or_404(CloudStorageModel, pk=storage_id)
-                        storage = db_storage_to_storage_instance(db_storage)
-
-                        export_to_cloud_storage(storage, file_path, filename)
-                        return Response(status=status.HTTP_200_OK)
-                    else:
-                        raise NotImplementedError()
+                if settings.USE_CACHE_S3:
+                    if s3_client.exists(file_path):
+                        rq_job.delete()
+                        return Response({'url': s3_client.get_presigned_url(file_path)}, status=status.HTTP_201_CREATED)
                 else:
-                    if osp.exists(file_path):
-                        return Response(status=status.HTTP_201_CREATED)
+                    if action == "download" and osp.exists(file_path):
+                        rq_job.delete()
+
+                        timestamp = datetime.strftime(last_instance_update_time,
+                            "%Y_%m_%d_%H_%M_%S")
+                        filename = filename or \
+                            "{}_{}-{}-{}{}".format(
+                                db_instance.__class__.__name__.lower(),
+                                db_instance.name if isinstance(db_instance, (Task, Project)) else db_instance.id,
+                                timestamp, format_name, osp.splitext(file_path)[1]
+                            ).lower()
+
+                        # save annotation to specified location
+                        location = location_conf.get('location')
+                        if location == Location.LOCAL:
+                            return sendfile(request, file_path, attachment=True,
+                                attachment_filename=filename)
+                        elif location == Location.CLOUD_STORAGE:
+                            try:
+                                storage_id = location_conf['storage_id']
+                            except KeyError:
+                                return HttpResponseBadRequest(
+                                    'Cloud storage location was selected for destination'
+                                    ' but cloud storage id was not specified')
+
+                            db_storage = get_object_or_404(CloudStorageModel, pk=storage_id)
+                            storage = db_storage_to_storage_instance(db_storage)
+
+                            export_to_cloud_storage(storage, file_path, filename)
+                            return Response(status=status.HTTP_200_OK)
+                        else:
+                            raise NotImplementedError()
+                    else:
+                        if osp.exists(file_path):
+                            return Response(status=status.HTTP_201_CREATED)
             elif rq_job.is_failed:
                 exc_info = str(rq_job.exc_info)
                 rq_job.delete()
