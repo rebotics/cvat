@@ -99,7 +99,7 @@ class S3Client:
             raise S3ClientError('Failed to post io to s3: {}'.format(response.content))
 
     def delete_object(self, key: str) -> bool:
-        return self._client.delete_object(self.bucket, self._key(key))
+        return self._client.delete_object(Bucket=self.bucket, Key=self._key(key))
 
     def set_tags(self, key: str, tags: dict) -> dict:
         return self._client.put_object_tagging(Bucket=self.bucket, Key=self._key(key), Tagging={
@@ -142,6 +142,12 @@ class S3Client:
 
     def head_object(self, key: str):
         return self._client.head_object(Bucket=self.bucket, Key=self._key(key))
+
+    def exists(self, key: str):
+        try:
+            return self.head_object(key)
+        except:
+            pass
 
     def _key(self, key: str) -> str:
         return os.path.join(settings.AWS_LOCATION, key)
