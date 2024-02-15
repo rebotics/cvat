@@ -875,7 +875,9 @@ IAM_OPA_DATA_URL = f'{IAM_OPA_HOST}/v1/data'
 
 LOGGING['root']['handlers'] = ['console']
 
-# TODO: check, why?
-# STATIC_ROOT = os.path.join(BASE_DIR, 'static', 'static')
-
-# TODO: update SPECTACULAR_SETTINGS
+SPECTACULAR_SETTINGS['TITLE'] = 'Rebotics CVAT REST API'
+SPECTACULAR_SETTINGS['CONTACT'] = {
+    'name': 'Rebotics BE team',
+    'url': 'https://github.com/rebotics/cvat',
+    'email': 'farid@retechlabs.com',
+}

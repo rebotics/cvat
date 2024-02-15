@@ -65,7 +65,7 @@ SILKY_MAX_RECORDED_REQUESTS = 10**4
 
 # Database
 # https://docs.djangoproject.com/en/3.2/ref/settings/#databases
-DATABASES['default']['HOST'] = os.getenv('CVAT_POSTGRES_HOST', 'localhost')
+# DATABASES['default']['HOST'] = os.getenv('CVAT_POSTGRES_HOST', 'localhost')
 
 QUALITY_CHECK_JOB_DELAY = 5
 ANALYTICS_CHECK_JOB_DELAY = 15
