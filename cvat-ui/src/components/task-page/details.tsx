@@ -18,11 +18,11 @@ import MdGuideControl from 'components/md-guide/md-guide-control';
 import Preview from 'components/common/preview';
 import { cancelInferenceAsync } from 'actions/models-actions';
 import { CombinedState, ActiveInference } from 'reducers';
+import { Priority, PriorityColors } from 'enums';
 import UserSelector from './user-selector';
 import BugTrackerEditor from './bug-tracker-editor';
 import LabelsEditorComponent from '../labels-editor/labels-editor';
 import ProjectSubsetField from '../create-task-page/project-subset-field';
-import { Priority, PriorityColors } from 'enums';
 
 interface OwnProps {
     task: Task;
@@ -202,7 +202,7 @@ class DetailsComponent extends React.PureComponent<Props, State> {
     }
 
     private renderPriority(): JSX.Element {
-        const { taskInstance } = this.props;
+        const { task: taskInstance } = this.props;
 
         const priorityText = Priority[taskInstance.priority] || 'None';
         const priorityColor = PriorityColors.get(taskInstance.priority) || grey.primary;

@@ -7,6 +7,7 @@ import _ from 'lodash';
 import {
     ChunkType, DimensionType, JobStage,
     JobState, JobType, RQStatus, StorageLocation, TaskMode, TaskStatus,
+    Priority,
 } from './enums';
 import { Storage } from './storage';
 
@@ -436,6 +437,7 @@ export class Job extends Session {
     public readonly updatedDate: string;
     public readonly sourceStorage: Storage;
     public readonly targetStorage: Storage;
+    public readonly filenames: string[];
 
     constructor(initialData: Readonly<Omit<SerializedJob, 'labels'> & { labels?: SerializedLabel[] }>) {
         super();
@@ -614,13 +616,6 @@ export class Job extends Session {
                 targetStorage: {
                     get: () => data.target_storage,
                 },
-                /**
-                 * @name filenames
-                 * @type {string[]}
-                 * @memberof module:API.cvat.classes.Job
-                 * @instance
-                 * @readonly
-                 */
                 filenames: {
                     get: () => [...data.filenames],
                 },
@@ -678,6 +673,7 @@ export class Task extends Session {
     public readonly size: number;
     public readonly mode: TaskMode;
     public readonly owner: User;
+    public readonly priority: Priority;
     public readonly createdDate: string;
     public readonly updatedDate: string;
     public readonly overlap: number | null;
@@ -1067,13 +1063,6 @@ export class Task extends Session {
                 organization: {
                     get: () => data.organization,
                 },
-                /**
-                 * @name priority
-                 * @type {module:API.cvat.enums.Priority}
-                 * @memberof module: API.cvat.classes.Task
-                 * @instance
-                 * @readonly
-                 */
                 priority: {
                     get: () => data.priority,
                 },

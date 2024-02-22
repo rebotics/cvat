@@ -555,13 +555,7 @@ class _JobFilenamesMixin(serializers.Serializer):
     filenames = serializers.SerializerMethodField()
 
     def get_filenames(self, obj: models.Job) -> List[str]:
-        task: models.Task = self.context.get('task')
-        if not task:
-            return []
-
-        data = task.data
-        if data is None or data.sorting_method == models.SortingMethod.RANDOM:
-            return []
+        data = obj.segment.task.data
 
         files = data.s3_files.all()
         filenames = [os.path.basename(file.file.name) for file in files]

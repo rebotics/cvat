@@ -13,7 +13,6 @@ import { Row, Col } from 'antd/lib/grid';
 import Text from 'antd/lib/typography/Text';
 import Pagination from 'antd/lib/pagination';
 import Empty from 'antd/lib/empty';
-import Input from 'antd/lib/input';
 import Button from 'antd/lib/button';
 import { CopyOutlined, PlusOutlined } from '@ant-design/icons';
 import { Task, Job } from 'cvat-core-wrapper';
@@ -29,16 +28,6 @@ import {
 const FilteringComponent = ResourceFilterHOC(
     config, localStorageRecentKeyword, localStorageRecentCapacity, predefinedFilterValues,
 );
-
-interface ImageSearchProps {
-    onImageSearch(task: any, imageName: string | null): void;
-    imageSearchQuery: string | null;
-    foundImages: [{
-        name: string,
-        jobId: number,
-        frame: number,
-    }];
-}
 
 interface Props {
     task: Task;
@@ -67,68 +56,10 @@ function setUpJobsList(jobs: Job[], query: JobsQuery): Job[] {
     return result;
 }
 
-function ImageSearchComponent(props: ImageSearchProps & { taskInstance: any }): JSX.Element {
-    const {
-        onImageSearch,
-        imageSearchQuery,
-        foundImages,
-        taskInstance,
-    } = props;
-
-    const history = useHistory();
-
-    let searchResults;
-    if (imageSearchQuery) {
-        if (foundImages.length > 0) {
-            searchResults = foundImages.map((item, i) => (
-                <Col className='cvat-task-page-image-search-result' xs={24} key={`image-search-result-${i}`}>
-                    <Button
-                        onClick={
-                            () => history.push(`/tasks/${taskInstance.id}/jobs/${item.jobId}/?frame=${item.frame}`)
-                        }
-                        type='link'
-                        size='small'
-                    >
-                        {item.name}
-                    </Button>
-                </Col>
-            ));
-        } else {
-            searchResults = (
-                <Col className='cvat-task-page-image-search-result' xs={24}>
-                    <Text>No images found...</Text>
-                </Col>
-            );
-        }
-    } else {
-        searchResults = null;
-    }
-
-    return (
-        <Row>
-            <Col xs={24}>
-                <Input.Search
-                    enterButton
-                    onSearch={(phrase: string) => {
-                        onImageSearch(taskInstance, phrase);
-                    }}
-                    defaultValue={imageSearchQuery || ''}
-                    className='cvat-task-page-image-search-bar'
-                    placeholder='Search image ...'
-                />
-            </Col>
-            {searchResults}
-        </Row>
-    );
-}
-
-function JobListComponent(props: Props & ImageSearchProps): JSX.Element {
+function JobListComponent(props: Props): JSX.Element {
     const {
         task: taskInstance,
         onUpdateJob,
-        onImageSearch,
-        imageSearchQuery,
-        foundImages,
     } = props;
     const [visibility, setVisibility] = useState(defaultVisibility);
 
@@ -204,12 +135,6 @@ function JobListComponent(props: Props & ImageSearchProps): JSX.Element {
                         </Button>
                     </CVATTooltip>
                 </Row>
-                <ImageSearchComponent
-                    onImageSearch={onImageSearch}
-                    imageSearchQuery={imageSearchQuery}
-                    foundImages={foundImages}
-                    taskInstance={taskInstance}
-                />
                 <Row>
                     <SortingComponent
                         visible={visibility.sorting}

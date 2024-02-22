@@ -18,9 +18,10 @@ import JobListComponent from 'components/task-page/job-list';
 import ModelRunnerModal from 'components/model-runner-modal/model-runner-dialog';
 import CVATLoadingSpinner from 'components/common/loading-spinner';
 import MoveTaskModal from 'components/move-task-modal/move-task-modal';
-import { CombinedState, ImageSearch } from 'reducers';
+import { CombinedState } from 'reducers';
 import TopBarComponent from './top-bar';
 import DetailsComponent from './details';
+import ImageSearchComponent from './image-search';
 
 const core = getCore();
 
@@ -145,7 +146,8 @@ function TaskPageComponent(): JSX.Element {
                 <Col span={22} xl={18} xxl={14}>
                     <TopBarComponent taskInstance={taskInstance} />
                     <DetailsComponent task={taskInstance} onUpdateTask={onUpdateTask} />
-                    <JobListComponent task={taskInstance} onUpdateJob={onJobUpdate} imageSearch={imageSearch} />
+                    <ImageSearchComponent task={taskInstance} />
+                    <JobListComponent task={taskInstance} onUpdateJob={onJobUpdate} />
                 </Col>
             </Row>
             <ModelRunnerModal />

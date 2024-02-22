@@ -5,7 +5,7 @@
 
 import { AnyAction, Dispatch, ActionCreator } from 'redux';
 import { ThunkAction } from 'redux-thunk';
-import { TasksQuery, StorageLocation, ImageSearchResult } from 'reducers';
+import { TasksQuery, StorageLocation } from 'reducers';
 import {
     getCore, RQStatus, Storage, Task,
 } from 'cvat-core-wrapper';
@@ -27,8 +27,6 @@ export enum TasksActionTypes {
     GET_TASK_PREVIEW_SUCCESS = 'GET_TASK_PREVIEW_SUCCESS',
     GET_TASK_PREVIEW_FAILED = 'GET_TASK_PREVIEW_FAILED',
     UPDATE_TASK_IN_STATE = 'UPDATE_TASK_IN_STATE',
-    SEARCH_IMAGE = 'SEARCH_IMAGE',
-    IMAGE_SEARCH_RESET = 'IMAGE_SEARCH_RESET',
 }
 
 function getTasks(query: Partial<TasksQuery>, updateQuery: boolean): AnyAction {
@@ -291,39 +289,4 @@ export function switchMoveTaskModalVisible(visible: boolean, taskId: number | nu
     };
 
     return action;
-}
-
-export function searchImage(taskInstance: any, name: string): AnyAction {
-    const query = name.length > 0 ? name : null;
-    const results: ImageSearchResult[] = [];
-
-    if (query) {
-        let frame = 0;
-        for (const job of taskInstance.jobs) {
-            for (const filename of job.filenames) {
-                if (filename.includes(name)) {
-                    results.push({
-                        name: filename,
-                        jobId: job.id,
-                        frame,
-                    });
-                }
-                frame++;
-            }
-        }
-    }
-
-    return {
-        type: TasksActionTypes.SEARCH_IMAGE,
-        payload: {
-            query,
-            results,
-        },
-    };
-}
-
-export function imageSearchReset(): AnyAction {
-    return {
-        type: TasksActionTypes.IMAGE_SEARCH_RESET,
-    };
 }
