@@ -1114,6 +1114,7 @@ class Comment(models.Model):
         return self.issue.get_job_id()
 
 class CloudProviderChoice(str, Enum):
+    REBOTICS_S3 = 'REBOTICS_S3_BUCKET'
     AWS_S3 = 'AWS_S3_BUCKET'
     AZURE_CONTAINER = 'AZURE_CONTAINER'
     GOOGLE_DRIVE = 'GOOGLE_DRIVE'

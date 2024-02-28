@@ -108,6 +108,7 @@ function SelectCloudStorage(props: Props): JSX.Element {
                         <span
                             className='cvat-cloud-storage-select-provider'
                         >
+                            {_cloudStorage.providerType === ProviderType.REBOTICS_S3_BUCKET && <S3Provider />}
                             {_cloudStorage.providerType === ProviderType.AWS_S3_BUCKET && <S3Provider />}
                             {_cloudStorage.providerType === ProviderType.AZURE_CONTAINER && <AzureProvider />}
                             {

@@ -329,6 +329,10 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
             wrapperCol: { offset: 2 },
         };
 
+        if (providerType === ProviderType.REBOTICS_S3_BUCKET) {
+            return null;
+        }
+
         if (providerType === ProviderType.AWS_S3_BUCKET && credentialsType === CredentialsType.KEY_SECRET_KEY_PAIR) {
             return (
                 <>
@@ -622,6 +626,27 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
         );
     };
 
+    const reboticsCloudStorageConfiguration = (): JSX.Element => {
+        const internalCommonProps = {
+            ...commonProps,
+            labelCol: { span: 6, offset: 1 },
+            wrapperCol: { offset: 1 },
+        };
+
+        return (
+            <Form.Item
+                label='Authorization type'
+                name='credentials_type'
+                rules={[{ required: true, message: 'Please, specify credentials type' }]}
+                {...internalCommonProps}
+            >
+                <Select onSelect={(value: CredentialsType) => onChangeCredentialsType(value)}>
+                    <Select.Option value={CredentialsType.ANONYMOUS_ACCESS}>Anonymous access</Select.Option>
+                </Select>
+            </Form.Item>
+        );
+    };
+
     return (
         <Form
             className='cvat-cloud-storage-form'
@@ -654,6 +679,12 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
                         form.resetFields(['credentials_type']);
                     }}
                 >
+                    <Select.Option value={ProviderType.REBOTICS_S3_BUCKET}>
+                        <span className='cvat-cloud-storage-select-provider'>
+                            <S3Provider />
+                            REBOTICS S3
+                        </span>
+                    </Select.Option>
                     <Select.Option value={ProviderType.AWS_S3_BUCKET}>
                         <span className='cvat-cloud-storage-select-provider'>
                             <S3Provider />
@@ -677,6 +708,7 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
             {providerType === ProviderType.AWS_S3_BUCKET && awsS3Configuration()}
             {providerType === ProviderType.AZURE_CONTAINER && azureBlobStorageConfiguration()}
             {providerType === ProviderType.GOOGLE_CLOUD_STORAGE && googleCloudStorageConfiguration()}
+            {providerType === ProviderType.REBOTICS_S3_BUCKET && reboticsCloudStorageConfiguration()}
             <Form.Item
                 label={(
                     <CVATTooltip title='Prefix is used to filter bucket content'>

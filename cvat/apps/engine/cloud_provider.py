@@ -330,7 +330,9 @@ def get_cloud_storage_instance(
     specific_attributes: Optional[Dict[str, Any]] = None,
 ):
     instance = None
-    if cloud_provider == CloudProviderChoice.AWS_S3:
+    if cloud_provider == CloudProviderChoice.REBOTICS_S3:
+        instance = REBOTICS_S3()
+    elif cloud_provider == CloudProviderChoice.AWS_S3:
         instance = AWS_S3(
             bucket=resource,
             access_key_id=credentials.key,
@@ -379,9 +381,11 @@ class AWS_S3(_CloudStorage):
                 session_token: Optional[str] = None,
                 endpoint_url: Optional[str] = None,
                 prefix: Optional[str] = None,
+                skip_credentials: bool = False,
     ):
         super().__init__(prefix=prefix)
         if (
+            not skip_credentials and
             sum(
                 1
                 for credential in (access_key_id, secret_key, session_token)
@@ -587,6 +591,26 @@ class AWS_S3(_CloudStorage):
         allowed_actions = Permissions.all() & {access.get(i) for i in allowed_actions}
 
         return allowed_actions
+
+
+class REBOTICS_S3(AWS_S3):
+    def __init__(self):
+        kwargs = {
+            'bucket': settings.AWS_STORAGE_BUCKET_NAME,
+            'region': settings.AWS_S3_REGION_NAME,
+            'endpoint_url': settings.AWS_S3_ENDPOINT_URL,
+            'prefix': settings.AWS_LOCATION,
+        }
+        aws_s3_access_key_id = getattr(settings, 'AWS_S3_ACCESS_KEY_ID', None)
+        aws_s3_secret_access_key = getattr(settings, 'AWS_S3_SECRET_ACCESS_KEY', None)
+        if aws_s3_access_key_id and aws_s3_secret_access_key:
+            kwargs['access_key_id'] = aws_s3_access_key_id
+            kwargs['secret_key'] = aws_s3_secret_access_key
+        else:
+            kwargs['skip_credentials'] = True
+
+        super().__init__(**kwargs)
+
 
 class AzureBlobContainer(_CloudStorage):
     MAX_CONCURRENCY = 3
