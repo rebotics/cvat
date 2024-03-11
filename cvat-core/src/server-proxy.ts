@@ -1182,105 +1182,6 @@ async function restoreProject(storage: Storage, file: File | string) {
     return wait();
 }
 
-async function createS3Task(
-    taskSpec: Partial<SerializedTask>,
-    taskDataSpec: any,
-    onUpdate: (state: RQStatus, progress: number, message: string) => void,
-) {
-    const { backendAPI, origin } = config;
-    // keep current default params to 'freeze" them during this request
-    const params = enableOrganization();
-
-    const clientFiles = taskDataSpec.client_files;
-    taskDataSpec.client_files = clientFiles.map((file) => file.name);
-
-    let totalSize = 0;
-    let totalSentSize = 0;
-    for (const file of clientFiles) {
-        totalSize += file.size;
-    }
-
-    const taskData = new FormData();
-    for (const [key, value] of Object.entries(taskDataSpec)) {
-        if (Array.isArray(value)) {
-            value.forEach((element, idx) => {
-                taskData.append(`${key}[${idx}]`, element);
-            });
-        } else {
-            taskData.set(key, value);
-        }
-    }
-
-    let response = null;
-
-    onUpdate(RQStatus.UNKNOWN, 0, 'CVAT is creating your task');
-    try {
-        response = await Axios.post(`${backendAPI}/tasks`, taskSpec, {
-            params,
-            headers: {
-                'Content-Type': 'application/json',
-            },
-        });
-    } catch (errorData) {
-        throw generateError(errorData);
-    }
-    const taskId = response.data.id
-
-    onUpdate(RQStatus.UNKNOWN, 0, 'CVAT is uploading task data to the server');
-
-    try {
-        response = await Axios.post(`${backendAPI}/tasks/${taskId}/s3-data`,
-            taskData, {
-            params,
-        });
-        const s3Urls = response.data;
-
-        const s3Axios = Axios.create();
-        delete s3Axios.defaults.headers.common.Authorization;
-        s3Axios.defaults.withCredentials = false;
-        s3Axios.defaults.params = {};
-
-        for (let i = 0; i < s3Urls.length; i++) {
-            const { url, fields } = s3Urls[i];
-            const data = {
-                ...fields,
-                file: clientFiles[i],
-            };
-            await s3Axios.post(
-                url,
-                data,
-                {
-                    headers: {
-                        'Content-Type': 'multipart/form-data',
-                    },
-                },
-            );
-
-            totalSentSize += clientFiles[i].size;
-            let percentage = totalSentSize/totalSize;
-            onUpdate(RQStatus.UNKNOWN, percentage, 'CVAT is uploading task data to the server');
-        }
-
-        await Axios.put(`${backendAPI}/tasks/${taskId}/s3-data`,
-            taskData, { params, });
-    } catch (errorData) {
-        try {
-            await deleteTask(taskId, params.org || null);
-        } catch (_) {
-            // ignore
-        }
-        throw generateError(errorData);
-    }
-
-    try {
-        const createdTask = await listenToCreateTask(taskId, onUpdate);
-        return createdTask;
-    } catch (createException) {
-        await deleteTask(taskId, params.org || null);
-        throw createException;
-    }
-}
-
 const listenToCreateCallbacks: Record<number, {
     promise: Promise<SerializedTask>;
     onUpdate: ((state: string, progress: number, message: string) => void)[];
@@ -2500,6 +2401,110 @@ async function getAnalyticsReports(filter): Promise<SerializedAnalyticsReport> {
     }
 }
 
+/**********************/
+/* Rebotics overrides */
+/**********************/
+async function createS3Task(
+    taskSpec: Partial<SerializedTask>,
+    taskDataSpec: any,
+    onUpdate: (state: RQStatus, progress: number, message: string) => void,
+) {
+    const { backendAPI, origin } = config;
+    // keep current default params to 'freeze" them during this request
+    const params = enableOrganization();
+
+    const clientFiles = taskDataSpec.client_files;
+    taskDataSpec.client_files = clientFiles.map((file) => file.name);
+
+    let totalSize = 0;
+    let totalSentSize = 0;
+    for (const file of clientFiles) {
+        totalSize += file.size;
+    }
+
+    const taskData = new FormData();
+    for (const [key, value] of Object.entries(taskDataSpec)) {
+        if (Array.isArray(value)) {
+            value.forEach((element, idx) => {
+                taskData.append(`${key}[${idx}]`, element);
+            });
+        } else {
+            taskData.set(key, value);
+        }
+    }
+
+    let response = null;
+
+    onUpdate(RQStatus.UNKNOWN, 0, 'CVAT is creating your task');
+    try {
+        response = await Axios.post(`${backendAPI}/tasks`, taskSpec, {
+            params,
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        });
+    } catch (errorData) {
+        throw generateError(errorData);
+    }
+    const taskId = response.data.id
+
+    onUpdate(RQStatus.UNKNOWN, 0, 'CVAT is uploading task data to the server');
+
+    try {
+        response = await Axios.post(`${backendAPI}/tasks/${taskId}/s3-data`,
+            taskData, {
+            params,
+        });
+        const s3Urls = response.data;
+
+        const s3Axios = Axios.create();
+        delete s3Axios.defaults.headers.common.Authorization;
+        s3Axios.defaults.withCredentials = false;
+        s3Axios.defaults.params = {};
+
+        for (let i = 0; i < s3Urls.length; i++) {
+            const { url, fields } = s3Urls[i];
+            const data = {
+                ...fields,
+                file: clientFiles[i],
+            };
+            await s3Axios.post(
+                url,
+                data,
+                {
+                    headers: {
+                        'Content-Type': 'multipart/form-data',
+                    },
+                },
+            );
+
+            totalSentSize += clientFiles[i].size;
+            let percentage = totalSentSize/totalSize;
+            onUpdate(RQStatus.UNKNOWN, percentage, 'CVAT is uploading task data to the server');
+        }
+
+        await Axios.put(`${backendAPI}/tasks/${taskId}/s3-data`,
+            taskData, { params, });
+    } catch (errorData) {
+        try {
+            await deleteTask(taskId, params.org || null);
+        } catch (_) {
+            // ignore
+        }
+        throw generateError(errorData);
+    }
+
+    try {
+        const createdTask = await listenToCreateTask(taskId, onUpdate);
+        return createdTask;
+    } catch (createException) {
+        await deleteTask(taskId, params.org || null);
+        throw createException;
+    }
+}
+// override
+createTask = createS3Task;
+
 export default Object.freeze({
     server: Object.freeze({
         setAuthData,
@@ -2536,7 +2541,7 @@ export default Object.freeze({
     tasks: Object.freeze({
         get: getTasks,
         save: saveTask,
-        create: createS3Task,
+        create: createTask,
         listenToCreate: listenToCreateTask,
         delete: deleteTask,
         exportDataset: exportDataset('tasks'),
