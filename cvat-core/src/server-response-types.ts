@@ -8,6 +8,7 @@ import {
     ShapeType, StorageLocation, LabelType,
     ShareFileType, Source, TaskMode, TaskStatus,
     CloudStorageCredentialsType, CloudStorageProviderType,
+    Priority,
 } from './enums';
 
 export interface SerializedAnnotationImporter {
@@ -112,6 +113,7 @@ export interface SerializedTask {
     subset: string;
     updated_date: string;
     url: string;
+    priority: Priority;
 }
 
 export interface SerializedJob {

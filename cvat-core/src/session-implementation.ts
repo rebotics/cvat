@@ -479,6 +479,9 @@ export function implementTask(Task) {
         if (typeof this.subset !== 'undefined') {
             taskSpec.subset = this.subset;
         }
+        if (typeof this.priority !== 'undefined') {
+            taskSpec.priority = this.priority;
+        }
 
         if (this.targetStorage) {
             taskSpec.target_storage = this.targetStorage.toJSON();
