@@ -1148,7 +1148,13 @@ def _create_noatomic(
 
 
 @transaction.atomic
-def _create_thread(db_task, data, isBackupRestore=False, isDatasetImport=False):
+def _create_thread(
+    db_task: Union[int, models.Task],
+    data: Dict[str, Any],
+    *,
+    isBackupRestore: bool = False,
+    isDatasetImport: bool = False,
+) -> None:
     _create_noatomic(db_task, data, isBackupRestore=isBackupRestore, isDatasetImport=isDatasetImport)
 
 

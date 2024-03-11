@@ -677,6 +677,7 @@ class DataChunkGetter:
                 path = os.path.realpath(frame_provider.get_chunk(self.number, self.quality))
                 return sendfile(request, path)
             elif self.type == 'frame' or self.type == 'preview':
+                # TODO: get single frame or preview.
                 self._check_frame_range(self.number)
 
                 if self.type == 'preview':
@@ -1139,7 +1140,7 @@ class TaskViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
             '202': OpenApiResponse(description='')
         }
     )
-    @action(detail=True, methods=['POST', 'PUT'], url_path=r's3-data')
+    @action(detail=True, methods=['POST', 'PUT'], url_path=r's3-data/?$', parser_classes=_UPLOAD_PARSER_CLASSES)
     def s3_data(self, request, pk):
         db_task = self.get_object()
 
@@ -1177,12 +1178,31 @@ class TaskViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
             db_data: Data = db_task.data
             serializer = S3DataSerializer(db_data, data=request.data)
             serializer.is_valid(raise_exception=True)
-            data = {k: v for k, v in serializer.data.items()}
+
+            # Create a temporary copy of the parameters we will try to create the task with
+            data = copy(serializer.data)
+
+            for optional_field in ['job_file_mapping', 'server_files_exclude']:
+                if optional_field in serializer.validated_data:
+                    data[optional_field] = serializer.validated_data[optional_field]
+
+            if (
+                    data['sorting_method'] == models.SortingMethod.PREDEFINED
+                    and (uploaded_files := data['client_files'])
+                    and (uploaded_file_order := serializer.validated_data[self._UPLOAD_FILE_ORDER_FIELD])
+            ):
+                # In the case of predefined sorting and custom file ordering,
+                # the requested order must be applied
+                data['client_files'] = self._sort_uploaded_files(uploaded_files, uploaded_file_order)
+
+            data['use_zip_chunks'] = serializer.validated_data['use_zip_chunks']
+            data['use_cache'] = serializer.validated_data['use_cache']
+            data['copy_data'] = serializer.validated_data['copy_data']
 
             if 'stop_frame' not in serializer.validated_data:
                 data['stop_frame'] = None
 
-            task.create(db_task.id, data)
+            task.create(db_task, data, self.request)
             return Response(data=serializer.data, status=status.HTTP_202_ACCEPTED)
 
     _UPLOAD_FILE_ORDER_FIELD = 'upload_file_order'

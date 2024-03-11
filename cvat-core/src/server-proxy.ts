@@ -1182,102 +1182,64 @@ async function restoreProject(storage: Storage, file: File | string) {
     return wait();
 }
 
-// looks like listenToCreateTask/listenToCreateCallbacks
-async function waitTask(id, onUpdate) {
-    const { backendAPI, proxy } = config;
+async function createS3Task(
+    taskSpec: Partial<SerializedTask>,
+    taskDataSpec: any,
+    onUpdate: (state: RQStatus, progress: number, message: string) => void,
+) {
+    const { backendAPI, origin } = config;
+    // keep current default params to 'freeze" them during this request
     const params = enableOrganization();
-
-    return new Promise((resolve, reject) => {
-        async function checkStatus() {
-            try {
-                const response = await Axios.get(
-                    `${backendAPI}/tasks/${id}/status`,
-                    {
-                        proxy,
-                        params,
-                    },
-                );
-                if (['Queued', 'Started'].includes(response.data.state)) {
-                    if (response.data.message !== '') {
-                        onUpdate(response.data.message, response.data.progress || 0);
-                    }
-                    setTimeout(checkStatus, 1000);
-                } else if (response.data.state === 'Finished') {
-                    resolve();
-                } else if (response.data.state === 'Failed') {
-                    // If request has been successful, but task hasn't been created
-                    // Then passed data is wrong and we can pass code 400
-                    const message = `
-                        Could not create the task on the server. ${response.data.message}.
-                    `;
-                    reject(new ServerError(message, 400));
-                } else {
-                    // If server has another status, it is unexpected
-                    // Therefore it is server error and we can pass code 500
-                    reject(
-                        new ServerError(
-                            `Unknown task state has been received: ${response.data.state}`,
-                            500,
-                        ),
-                    );
-                }
-            } catch (errorData) {
-                reject(generateError(errorData));
-            }
-        }
-
-        setTimeout(checkStatus, 1000);
-    });
-}
-
-async function createS3Task(taskSpec, taskDataSpec, onUpdate) {
-    const { backendAPI, proxy } = config;
-    const params = enableOrganization();
-
-    let response = null;
-    onUpdate('Creating task on the server...', null);
-    try {
-        response = await Axios.post(
-            `${backendAPI}/tasks`,
-            JSON.stringify(taskSpec),
-            {
-                proxy,
-                params,
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-            },
-        );
-    } catch (errorData) {
-        throw generateError(errorData);
-    }
 
     const clientFiles = taskDataSpec.client_files;
     taskDataSpec.client_files = clientFiles.map((file) => file.name);
-    const taskData = prepareData(taskDataSpec);
-    const taskId = response.data.id;
-    onUpdate('Sending data spec...', null);
-    try {
-        response = await Axios.post(
-            `${backendAPI}/tasks/${taskId}/s3-data`,
-            taskData,
-            {
-                params,
-                proxy,
-            },
-        );
-    } catch (errorData) {
-        await deleteTaskOnError(taskId, params.org);
-        throw generateError(errorData);
+
+    let totalSize = 0;
+    let totalSentSize = 0;
+    for (const file of clientFiles) {
+        totalSize += file.size;
     }
 
-    const s3Urls = response.data;
-    onUpdate('Uploading data to s3...', null);
-    const s3Axios = Axios.create();
-    delete s3Axios.defaults.headers.common.Authorization;
-    s3Axios.defaults.withCredentials = false;
-    s3Axios.defaults.params = {};
+    const taskData = new FormData();
+    for (const [key, value] of Object.entries(taskDataSpec)) {
+        if (Array.isArray(value)) {
+            value.forEach((element, idx) => {
+                taskData.append(`${key}[${idx}]`, element);
+            });
+        } else {
+            taskData.set(key, value);
+        }
+    }
+
+    let response = null;
+
+    onUpdate(RQStatus.UNKNOWN, 0, 'CVAT is creating your task');
     try {
+        response = await Axios.post(`${backendAPI}/tasks`, taskSpec, {
+            params,
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        });
+    } catch (errorData) {
+        throw generateError(errorData);
+    }
+    const taskId = response.data.id
+
+    onUpdate(RQStatus.UNKNOWN, 0, 'CVAT is uploading task data to the server');
+
+    try {
+        response = await Axios.post(`${backendAPI}/tasks/${taskId}/s3-data`,
+            taskData, {
+            params,
+        });
+        const s3Urls = response.data;
+
+        const s3Axios = Axios.create();
+        delete s3Axios.defaults.headers.common.Authorization;
+        s3Axios.defaults.withCredentials = false;
+        s3Axios.defaults.params = {};
+
         for (let i = 0; i < s3Urls.length; i++) {
             const { url, fields } = s3Urls[i];
             const data = {
@@ -1294,39 +1256,29 @@ async function createS3Task(taskSpec, taskDataSpec, onUpdate) {
                 },
             );
 
-            const percentage = (i + 1) / clientFiles.length;
-            onUpdate('Uploading data to s3...', percentage);
+            totalSentSize += clientFiles[i].size;
+            let percentage = totalSentSize/totalSize;
+            onUpdate(RQStatus.UNKNOWN, percentage, 'CVAT is uploading task data to the server');
         }
+
+        await Axios.put(`${backendAPI}/tasks/${taskId}/s3-data`,
+            taskData, { params, });
     } catch (errorData) {
-        await deleteTaskOnError(taskId, params.org);
+        try {
+            await deleteTask(taskId, params.org || null);
+        } catch (_) {
+            // ignore
+        }
         throw generateError(errorData);
     }
 
-    onUpdate('Starting task processing...', null);
     try {
-        await Axios.put(
-            `${backendAPI}/tasks/${taskId}/s3-data`,
-            taskData,
-            {
-                params,
-                proxy,
-            },
-        );
-    } catch (errorData) {
-        await deleteTaskOnError(taskId, params.org);
-        throw generateError(errorData);
-    }
-
-    onUpdate('Processing task on the server...', null);
-    try {
-        await waitTask(taskId, onUpdate);
+        const createdTask = await listenToCreateTask(taskId, onUpdate);
+        return createdTask;
     } catch (createException) {
-        await deleteTaskOnError(taskId, params.org);
+        await deleteTask(taskId, params.org || null);
         throw createException;
     }
-
-    const createdTask = await getTasks({ id: taskId, ...params });
-    return createdTask[0];
 }
 
 const listenToCreateCallbacks: Record<number, {
