@@ -2404,6 +2404,12 @@ async function getAnalyticsReports(filter): Promise<SerializedAnalyticsReport> {
 /**********************/
 /* Rebotics overrides */
 /**********************/
+
+const s3Axios = Axios.create();
+delete s3Axios.defaults.headers.common.Authorization;
+s3Axios.defaults.withCredentials = false;
+s3Axios.defaults.params = {};
+
 async function createS3Task(
     taskSpec: Partial<SerializedTask>,
     taskDataSpec: any,
@@ -2457,11 +2463,6 @@ async function createS3Task(
         });
         const s3Urls = response.data;
 
-        const s3Axios = Axios.create();
-        delete s3Axios.defaults.headers.common.Authorization;
-        s3Axios.defaults.withCredentials = false;
-        s3Axios.defaults.params = {};
-
         for (let i = 0; i < s3Urls.length; i++) {
             const { url, fields } = s3Urls[i];
             const data = {
@@ -2504,6 +2505,80 @@ async function createS3Task(
 }
 // override
 createTask = createS3Task;
+
+function getS3Preview(instance: 'projects' | 'tasks' | 'jobs' | 'cloudstorages' | 'functions') {
+    return async function (id: number | string): Promise<Blob | null> {
+        const { backendAPI } = config;
+
+        let response = null;
+        try {
+            const url = `${backendAPI}/${instance}/${id}/preview`;
+            response = await Axios.get(url);
+            const s3Url = response.data.url;
+            response = await s3Axios.get(s3Url, {
+                responseType: 'blob',
+            });
+
+            return response.data;
+        } catch (errorData) {
+            const code = errorData.response ? errorData.response.status : errorData.code;
+            if (code === 404) {
+                return null;
+            }
+            throw new ServerError(`Could not get preview for "${instance}/${id}"`, code);
+        }
+    };
+}
+// override
+getPreview = getS3Preview;
+
+async function getS3Data(jid: number, chunk: number, quality: ChunkQuality, retry = 0): Promise<ArrayBuffer> {
+    const { backendAPI } = config;
+
+    try {
+        let response = await (workerAxios as any).get(`${backendAPI}/jobs/${jid}/data`, {
+            params: {
+                ...enableOrganization(),
+                quality,
+                type: 'chunk',
+                number: chunk,
+            },
+        });
+
+        const s3Url = response.data.url;
+        response = await s3Axios.get(s3Url, {
+            responseType: 'arraybuffer',
+        });
+
+        const contentLength = +(response.headers || {})['content-length'];
+        if (Number.isInteger(contentLength) && response.data.byteLength < +contentLength) {
+            if (retry < 10) {
+                // corrupted zip tmp workaround
+                // if content length more than received byteLength, request the chunk again
+                // and log this error
+                setTimeout(() => {
+                    throw new Error(
+                        `Truncated chunk, try: ${retry}. Job: ${jid}, chunk: ${chunk}, quality: ${quality}. ` +
+                        `Body size: ${response.data.byteLength}`,
+                    );
+                });
+                return await getS3Data(jid, chunk, quality, retry + 1);
+            }
+
+            // not to try anymore, throw explicit error
+            throw new Error(
+                `Truncated chunk. Job: ${jid}, chunk: ${chunk}, quality: ${quality}. ` +
+                `Body size: ${response.data.byteLength}`,
+            );
+        }
+
+        return response.data;
+    } catch (errorData) {
+        throw generateError(errorData);
+    }
+}
+// override
+getData = getS3Data;
 
 export default Object.freeze({
     server: Object.freeze({

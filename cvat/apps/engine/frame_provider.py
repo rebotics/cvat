@@ -18,6 +18,9 @@ from cvat.apps.engine.mime_types import mimetypes
 from cvat.apps.engine.models import DataChoice, StorageMethodChoice, DimensionType
 from rest_framework.exceptions import ValidationError
 
+from django.conf import settings
+from cvat.apps.engine.media_extractors import S3ZipReader
+
 class RandomAccessIterator:
     def __init__(self, iterable):
         self.iterable = iterable
@@ -106,7 +109,7 @@ class FrameProvider:
         self._loaders = {}
 
         reader_class = {
-            DataChoice.IMAGESET: ZipReader,
+            DataChoice.IMAGESET: S3ZipReader if settings.USE_CACHE_S3 else ZipReader,
             DataChoice.VIDEO: VideoReader,
         }
 

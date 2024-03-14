@@ -37,6 +37,10 @@ from cvat.apps.engine.models import (DataChoice, DimensionType, Job, Image,
 from cvat.apps.engine.utils import md5_hash, preload_images
 from utils.dataset_manifest import ImageManifestManager
 
+from cvat.rebotics.cache import s3_media_cache
+from cvat.apps.engine.utils import preload_s3_images
+from cvat.apps.engine.media_extractors import S3DatasetManifestReader
+
 slogger = ServerLogManager(__name__)
 
 class MediaCache:
@@ -141,7 +145,7 @@ class MediaCache:
         images = []
         tmp_dir = None
         upload_dir = {
-            StorageChoice.LOCAL: db_data.get_upload_dirname(),
+            StorageChoice.LOCAL: db_data.get_s3_upload_dirname(),
             StorageChoice.SHARE: settings.SHARE_ROOT,
             StorageChoice.CLOUD_STORAGE: db_data.get_upload_dirname(),
         }[db_data.storage]
@@ -157,7 +161,7 @@ class MediaCache:
                 for frame in reader:
                     images.append((frame, source_path, None))
             else:
-                reader = ImageDatasetManifestReader(manifest_path=db_data.get_manifest_path(),
+                reader = S3DatasetManifestReader(manifest_path=db_data.get_s3_manifest_path(),
                     chunk_number=chunk_number, chunk_size=db_data.chunk_size,
                     start=db_data.start_frame, stop=db_data.stop_frame,
                     step=db_data.get_frame_step())
@@ -198,7 +202,7 @@ class MediaCache:
                         source_path = os.path.join(upload_dir, f"{item['name']}{item['extension']}")
                         images.append((source_path, source_path, None))
                     if dimension == DimensionType.DIM_2D:
-                        images = preload_images(images)
+                        images = preload_s3_images(images)
 
             yield images
         finally:
@@ -347,3 +351,41 @@ class MediaCache:
         mime_type = 'application/zip'
         zip_buffer.seek(0)
         return zip_buffer, mime_type
+
+
+_MediaCache = MediaCache
+
+
+class S3CacheException(Exception):
+    pass
+
+
+class S3MediaCache(_MediaCache):
+    def __init__(self, dimension=DimensionType.DIM_2D):
+        super().__init__(dimension=dimension)
+        self._cache = s3_media_cache
+
+    def _get_or_set_cache_item(self, key, create_function):
+        slogger.glob.info(f'Getting chunk from cache: key {key}')
+        item = self._cache.get(key, tags=('mime_type',))
+        if not item:
+            slogger.glob.error(f'Failed to get chunk from cache: key {key}')
+            slogger.glob.info(f'Preparing chunk: key {key}')
+            buff, mime_type = create_function()
+            slogger.glob.info(f'Setting chunk to cache: key {key}')
+            item = self._cache.set(key, buff, tags={'mime_type': mime_type})
+            if not item:
+                slogger.glob.error(f'Failed to set chunk to cache: key {key}')
+                raise S3CacheException('Failed to get or set chunk in s3 cache')
+        return item[0], item[1]['mime_type']
+
+    def get_cloud_preview_with_mime(
+        self,
+        db_storage: CloudStorage,
+    ) -> Optional[Tuple[io.BytesIO, str]]:
+        key = f'cloudstorage_{db_storage.id}_preview'
+        item = self._cache.get(key, tags=('mime_type',))
+        return item[0], item[1]['mime_type']
+
+
+MediaCache = S3MediaCache

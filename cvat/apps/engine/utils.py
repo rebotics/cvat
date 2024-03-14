@@ -36,6 +36,8 @@ from django_sendfile import sendfile as _sendfile
 from django.conf import settings
 from redis.lock import Lock
 
+from cvat.rebotics.s3_client import s3_client
+
 Import = namedtuple("Import", ["module", "name", "alias"])
 
 KEY_TO_EXCLUDE_FROM_DEPENDENCY = 'exclude_from_dependency'
@@ -436,3 +438,14 @@ def build_annotations_file_name(
         class_name, identifier, 'annotations' if is_annotation_file else 'dataset',
         timestamp, format_name, extension,
     ).lower()
+
+
+def preload_s3_image(image: tuple[str, str, str])-> tuple[Image.Image, str, str]:
+    with s3_client.download_to_io(image[0]) as f:
+        pil_img = Image.open(f)
+        pil_img.load()
+    return pil_img, image[1], image[2]
+
+
+def preload_s3_images(images: Iterable[tuple[str, str, str]]) -> list[tuple[Image.Image, str, str]]:
+    return list(map(preload_s3_image, images))

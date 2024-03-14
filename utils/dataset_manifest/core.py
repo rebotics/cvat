@@ -20,7 +20,9 @@ from .utils import SortingMethod, md5_hash, rotate_image, sort
 
 from typing import Dict, List, Union, Optional
 
+from tempfile import NamedTemporaryFile
 from django.utils.text import get_valid_filename
+from botocore.exceptions import ClientError
 from cvat.rebotics.cache import default_cache
 from cvat.rebotics.s3_client import s3_client
 from cvat.rebotics.utils import injected_property
@@ -798,29 +800,34 @@ def clean_filenames(manifest_path, skip=2):
 class _S3Manifest(_Manifest):
     """Manifest stored on s3 instead of local files"""
     def __init__(self, path, upload_dir=None):
-        # override super().__init__(...)
-        # avoid changing base class for easier future updates.
-        self._path = path if path.endswith('.jsonl') else os.path.join(path, self.FILE_NAME)
-        self._file = None
+        # override super().__init__ to skip assert.
+        self._key = path if path.endswith('.jsonl') else os.path.join(path, self.FILE_NAME)
+        self._upload_dir = upload_dir
+
+        try:
+            self._path = s3_client.download_to_temp(self._key)
+        except ClientError:
+            with NamedTemporaryFile(delete=False) as f:
+                self._path = f.name
+
+    @property
+    def key(self):
+        return self._key
 
     def __del__(self):
         try:
-            os.remove(self._file)
+            os.remove(self._path)
         except FileNotFoundError:
             pass
 
-    @property
-    def file(self):
-        if self._file is None:
-            s3_client.download_to_temp(self._path)
-        return self._file
+    # TODO: make manifest inmemory (get from s3, use from inmemory, then save back if needed)
+    #   rewrite corresponding classes: Manager, Validator, Index.
 
 
 class _CachedIndex(_Index):
     """Index stored in cache instead of local files."""
     def __init__(self, path):
-        # override super().__init__(...).
-        # avoid changing base class for easier future updates.
+        # override super().__init__ to skip assert.
         self._path = os.path.join(path, self.FILE_NAME)
         self._index = {}
 
@@ -843,8 +850,7 @@ class _CachedIndex(_Index):
 class CachedIndexManifestManager(ImageManifestManager):
     """Manifest manager with index stored in cache instead of local files"""
     def __init__(self, manifest_path, upload_dir=None, create_index=True):
-        # override super().__init__(...)
-        # avoid changing base class for easier future updates.
+        # override super().__init__ to skip asserts.
         self._manifest = _Manifest(manifest_path, upload_dir)
         self._index = _CachedIndex(os.path.dirname(self._manifest.path))
         self._reader = None
@@ -860,30 +866,26 @@ class CachedIndexManifestManager(ImageManifestManager):
                 self._index.dump()
 
     def reset_index(self):
-        if self._create_index:
+        if self._create_index and self._index.path in default_cache:
             self._index.remove()
 
 
 class S3ManifestManager(CachedIndexManifestManager):
     """Manifest manager with manifest stored on s3 and index - in cache"""
     def __init__(self, manifest_path, upload_dir=None, create_index=True):
-        # override super().__init__(...)
-        # avoid changing base class for easier future updates.
+        # override super().__init__ to avoid re-creating index and manifest
         self._manifest = _S3Manifest(manifest_path, upload_dir)
         self._index = _CachedIndex(os.path.dirname(self._manifest.path))
         self._reader = None
         self._create_index = create_index
         setattr(self._manifest, 'TYPE', 'images')
 
-    def remove(self):
         self.reset_index()
-        s3_client.delete_object(self._manifest.path)
+
+    def remove(self):
+        super().remove()
+        s3_client.delete_object(self._manifest.key)
 
     def create(self, content=None, _tqdm=None):
-        with StringIO() as manifest_file:
-            self._write_base_information(manifest_file)
-            obj = content if content else self._reader
-            self._write_core_part(manifest_file, obj, _tqdm)
-            s3_client.upload_from_io(manifest_file, self._manifest.path)
-
-        self.set_index()
+        super().create()
+        s3_client.upload_from_path(self._manifest.path, self._manifest.key)

@@ -660,24 +660,17 @@ class DataChunkGetter:
                 if settings.USE_CACHE and db_data.storage_method == StorageMethodChoice.CACHE:
                     buff, mime_type = frame_provider.get_chunk(self.number, self.quality)
                     if settings.USE_CACHE_S3:
-                        # buff is an s3 key, return url + mime in a json response
-                        return Response(data={
-                            'url': s3_client.get_presigned_url(buff),
-                            'mime': mime_type
-                        })
+                        # buff is an s3 key
+                        return Response(data={'url': s3_client.get_presigned_url(buff), 'mime': mime_type})
                     else:
-                        # buff is an io, return its contents in response
-                        buff.seek(0)
-                        response = HttpResponse(buff.getvalue(), content_type=mime_type)
-                        buff.close()
-                        return response
+                        # buff is an io
+                        return HttpResponse(buff.getvalue(), content_type=mime_type)
 
                 # Follow symbol links if the chunk is a link on a real image otherwise
                 # mimetype detection inside sendfile will work incorrectly.
                 path = os.path.realpath(frame_provider.get_chunk(self.number, self.quality))
                 return sendfile(request, path)
             elif self.type == 'frame' or self.type == 'preview':
-                # TODO: get single frame or preview.
                 self._check_frame_range(self.number)
 
                 if self.type == 'preview':
@@ -686,7 +679,12 @@ class DataChunkGetter:
                 else:
                     buf, mime = frame_provider.get_frame(self.number, self.quality)
 
-                return HttpResponse(buf.getvalue(), content_type=mime)
+                if settings.USE_CACHE_S3:
+                    # buf is an s3 key
+                    return Response(data={'url': s3_client.get_presigned_url(buf), 'mime': mime})
+                else:
+                    # buf is an io
+                    return HttpResponse(buf.getvalue(), content_type=mime)
 
             elif self.type == 'context_image':
                 self._check_frame_range(self.number)
@@ -2676,6 +2674,7 @@ class CloudStorageViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
             # The idea is try to define real manifest preview only for the storages that have related manifests
             # because otherwise it can lead to extra calls to a bucket, that are usually not free.
             if not db_storage.has_at_least_one_manifest:
+                # TODO if settings.USE_S3_CACHE -> s3_client preview
                 result = cache.get_cloud_preview_with_mime(db_storage)
                 if not result:
                     return HttpResponseNotFound('Cloud storage preview not found')
