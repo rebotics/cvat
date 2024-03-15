@@ -875,12 +875,10 @@ class S3ManifestManager(CachedIndexManifestManager):
     def __init__(self, manifest_path, upload_dir=None, create_index=True):
         # override super().__init__ to avoid re-creating index and manifest
         self._manifest = _S3Manifest(manifest_path, upload_dir)
-        self._index = _CachedIndex(os.path.dirname(self._manifest.path))
+        self._index = _CachedIndex(os.path.dirname(self._manifest.key))
         self._reader = None
         self._create_index = create_index
         setattr(self._manifest, 'TYPE', 'images')
-
-        self.reset_index()
 
     def remove(self):
         super().remove()
