@@ -193,6 +193,7 @@ function mapStateToProps(state: CombinedState): StateToProps {
             },
             shapes: {
                 opacity, colorBy, selectedOpacity, outlined, outlineColor, showBitmap, showProjections, showGroundTruth,
+                lineWidth,
             },
             imageFilters,
         },
@@ -212,6 +213,7 @@ function mapStateToProps(state: CombinedState): StateToProps {
         activatedAttributeID,
         annotations,
         opacity: opacity / 100,
+        lineWidth,
         colorBy,
         selectedOpacity: selectedOpacity / 100,
         outlined,
