@@ -526,7 +526,7 @@ def _create_noatomic(
         job.save_meta()
 
     if data['remote_files'] and not isDatasetImport:
-        data['remote_files'] = _download_data(data['remote_files'], upload_dir)
+        data['remote_files'] = _download_files(db_data, upload_dir)
 
     s3_files = _download_s3_files(db_data, upload_dir)
     if s3_files:
@@ -1259,6 +1259,55 @@ def _move_data_to_s3(db_task: models.Task, db_data: models.Data):
     _move_remote_files_to_s3(db_data)
     shutil.rmtree(db_data.get_data_dirname())
     slogger.glob.info('Done.')
+
+
+def _download_files(db_data, upload_dir):
+    job = rq.get_current_job()
+    local_files = {}
+    remote_files = db_data.remote_files.all()
+
+    with make_requests_session() as session:
+        for file in remote_files:
+            url = file.file
+            name = os.path.basename(urlrequest.url2pathname(urlparse.urlparse(url).path))
+            if name in local_files:
+                raise Exception("filename collision: {}".format(name))
+            _validate_scheme(url)
+            slogger.glob.info("Downloading: {}".format(url))
+            job.meta['status'] = '{} is being downloaded..'.format(url)
+            job.save_meta()
+
+            response = session.get(url, stream=True, proxies=PROXIES_FOR_UNTRUSTED_URLS)
+            if response.status_code == 200:
+                response.raw.decode_content = True
+                output_path = os.path.join(upload_dir, name)
+                with open(output_path, 'wb') as output_file:
+                    shutil.copyfileobj(response.raw, output_file)
+
+                new_name = fix_filename(name, output_path, file)
+                if new_name != name:
+                    new_path = os.path.join(upload_dir, new_name)
+                    os.rename(output_path, new_path)
+            else:
+                error_message = f"Failed to download {response.url}"
+                if url != response.url:
+                    error_message += f" (redirected from {url})"
+
+                if response.status_code == 407:
+                    error_message += "; likely attempt to access internal host"
+                elif response.status_code:
+                    error_message += f"; HTTP error {response.status_code}"
+
+                raise Exception(error_message)
+
+            if file.meta is None:
+                file.meta = {'name': new_name}
+            else:
+                file.meta['name'] = new_name
+            file.save()
+            local_files[name] = new_name
+
+    return list(local_files.values())
 
 
 def _download_s3_files(db_data: models.Data, upload_dir):
