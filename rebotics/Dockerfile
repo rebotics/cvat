@@ -222,7 +222,7 @@ COPY --chown=${USER} rqscheduler.py ${HOME}
 # Install UI
 COPY --from=cvat-ui --chown=${USER} /tmp/cvat-ui/dist ${HOME}/static-ui
 RUN sed -i -E "s#(<\!doctype html>)#{% load static %}\1#g" ${HOME}/static-ui/index.html && \
-    perl -pe "s#\"/(assets/.*?)\"#\"{% static \"\1\" %}\"#g" -i ${HOME}/static-ui/index.html \
+    perl -pe "s#\"/(assets/.*?)\"#\"{% static \"\1\" %}\"#g" -i ${HOME}/static-ui/index.html && \
     mkdir -p ${HOME}/cvat/apps/rebotics/templates && \
     mv ${HOME}/static-ui/index.html ${HOME}/cvat/apps/rebotics/templates
 
