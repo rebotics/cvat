@@ -712,7 +712,8 @@ class ZipChunkWriter(IChunkWriter):
                         finally:
                             rot_image.close()
                     else:
-                        output = path
+                        image.save(output, format=image.format if image.format else self.IMAGE_EXT,
+                                   quality=100, subsampling=0)
                 else:
                     output, ext = self._write_pcd_file(path)[0:2]
                 arcname = '{:06d}.{}'.format(idx, ext)
