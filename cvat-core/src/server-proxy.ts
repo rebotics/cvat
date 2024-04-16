@@ -826,15 +826,6 @@ async function updateLabel(id: number, body: SerializedLabel): Promise<Serialize
     return response.data;
 }
 
-async function deleteTaskOnError(taskId, org) {
-    try {
-        await deleteTask(taskId, org || null);
-    } catch (e) {
-        console.log('Error deleting task');
-        console.log(e);
-    }
-}
-
 function exportDataset(instanceType: 'projects' | 'jobs' | 'tasks') {
     return async function (
         id: number,
@@ -2401,9 +2392,9 @@ async function getAnalyticsReports(filter): Promise<SerializedAnalyticsReport> {
     }
 }
 
-/**********************/
+/* ****************** */
 /* Rebotics overrides */
-/**********************/
+/* ****************** */
 
 const s3Axios = Axios.create();
 delete s3Axios.defaults.headers.common.Authorization;
@@ -2452,15 +2443,16 @@ async function createS3Task(
     } catch (errorData) {
         throw generateError(errorData);
     }
-    const taskId = response.data.id
+    const taskId = response.data.id;
 
     onUpdate(RQStatus.UNKNOWN, 0, 'CVAT is uploading task data to the server');
 
     try {
-        response = await Axios.post(`${backendAPI}/tasks/${taskId}/s3-data`,
-            taskData, {
-            params,
-        });
+        response = await Axios.post(
+            `${origin}${backendAPI}/tasks/${taskId}/s3-data`,
+            taskData,
+            { params, }
+        );
         const s3Urls = response.data;
 
         for (let i = 0; i < s3Urls.length; i++) {
@@ -2480,12 +2472,15 @@ async function createS3Task(
             );
 
             totalSentSize += clientFiles[i].size;
-            let percentage = totalSentSize/totalSize;
+            const percentage = totalSentSize / totalSize;
             onUpdate(RQStatus.UNKNOWN, percentage, 'CVAT is uploading task data to the server');
         }
 
-        await Axios.put(`${backendAPI}/tasks/${taskId}/s3-data`,
-            taskData, { params, });
+        await Axios.put(
+            `${backendAPI}/tasks/${taskId}/s3-data`,
+            taskData,
+            { params, }
+        );
     } catch (errorData) {
         try {
             await deleteTask(taskId, params.org || null);

@@ -552,8 +552,14 @@ class ImageDatasetManifestReader(FragmentMediaReader):
             yield self._manifest[idx]
 
 
-class S3DatasetManifestReader(ImageDatasetManifestReader):
+_ImageDatesetManifestReader = ImageDatasetManifestReader
+
+
+class S3DatasetManifestReader(_ImageDatesetManifestReader):
     _manifest_class = S3ManifestManager
+
+
+ImageDatasetManifestReader = S3DatasetManifestReader
 
 
 class VideoDatasetManifestReader(FragmentMediaReader):

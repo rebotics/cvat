@@ -39,7 +39,6 @@ from utils.dataset_manifest import ImageManifestManager
 
 from cvat.rebotics.cache import s3_media_cache
 from cvat.apps.engine.utils import preload_s3_images
-from cvat.apps.engine.media_extractors import S3DatasetManifestReader
 
 slogger = ServerLogManager(__name__)
 
@@ -161,7 +160,7 @@ class MediaCache:
                 for frame in reader:
                     images.append((frame, source_path, None))
             else:
-                reader = S3DatasetManifestReader(manifest_path=db_data.get_s3_manifest_path(),
+                reader = ImageDatasetManifestReader(manifest_path=db_data.get_s3_manifest_path(),
                     chunk_number=chunk_number, chunk_size=db_data.chunk_size,
                     start=db_data.start_frame, stop=db_data.stop_frame,
                     step=db_data.get_frame_step())
