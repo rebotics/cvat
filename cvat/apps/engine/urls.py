@@ -7,9 +7,6 @@ from django.urls import path, include
 from . import views
 from rest_framework import routers
 
-from django.views.generic import RedirectView
-from django.conf import settings
-
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 
 router = routers.DefaultRouter(trailing_slash=False)

@@ -2405,7 +2405,7 @@ async function createS3Task(
     taskSpec: Partial<SerializedTask>,
     taskDataSpec: any,
     onUpdate: (state: RQStatus, progress: number, message: string) => void,
-) {
+): Promise<SerializedTask> {
     const { backendAPI, origin } = config;
     // keep current default params to 'freeze" them during this request
     const params = enableOrganization();
@@ -2451,7 +2451,7 @@ async function createS3Task(
         response = await Axios.post(
             `${origin}${backendAPI}/tasks/${taskId}/s3-data`,
             taskData,
-            { params, }
+            { params },
         );
         const s3Urls = response.data;
 
@@ -2479,7 +2479,7 @@ async function createS3Task(
         await Axios.put(
             `${backendAPI}/tasks/${taskId}/s3-data`,
             taskData,
-            { params, }
+            { params },
         );
     } catch (errorData) {
         try {

@@ -17,7 +17,6 @@ from cvat.apps.organizations.models import Organization
 from cvat.apps.engine.views import TaskViewSet
 from cvat.apps.engine.media_extractors import sort
 from cvat.apps.engine.log import ServerLogManager
-from cvat.rebotics.s3_client import s3_client
 
 from utils.dataset_manifest import S3ManifestManager
 
@@ -45,7 +44,7 @@ def _rand_color():
     choices = '0123456789ABCDEF'
     color = '#'
     for _ in range(6):
-        color += random.choice(choices)
+        color += random.choice(choices)  # nosec B311
     return color
 
 

@@ -6,6 +6,7 @@ from tempfile import NamedTemporaryFile
 from cvat.rebotics.utils import setting
 
 import boto3
+from botocore.exceptions import ClientError
 from django.conf import settings
 
 
@@ -94,6 +95,7 @@ class S3Client:
             dest['url'],
             data=dest['fields'],
             files={'file': io},
+            timeout=60,
         )
 
         if response.status_code != 204:
@@ -147,7 +149,7 @@ class S3Client:
     def exists(self, key: str):
         try:
             return self.head_object(key)
-        except:
+        except ClientError:
             pass
 
     def _key(self, key: str) -> str:

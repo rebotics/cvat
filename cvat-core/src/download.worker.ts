@@ -8,11 +8,11 @@ import Axios from 'axios';
 import './axios-config';
 
 onmessage = (e) => {
-    let config = {...e.data.config};
+    const config = { ...e.data.config };
     if (config.removeAuthHeader) {
         delete config.removeAuthHeader;
         config.transformRequest = (data, headers) => {
-            delete headers.common['Authorization'];
+            delete headers.common.Authorization;
             return data;
         };
     }

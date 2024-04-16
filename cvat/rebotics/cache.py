@@ -1,9 +1,8 @@
 import os
 import redis
 import json
-import pickle
-from io import IOBase, BytesIO
-from typing import Iterable, Any
+from io import IOBase
+from typing import Iterable
 from botocore.exceptions import ClientError
 from django.conf import settings
 

@@ -22,7 +22,7 @@ from django.contrib.auth.models import User
 from django.db import IntegrityError, transaction
 from django.db.models import Count
 from django.db.models.query import Prefetch
-from django.http import HttpResponse, HttpRequest, HttpResponseNotFound, HttpResponseBadRequest, Http404
+from django.http import HttpResponse, HttpRequest, HttpResponseNotFound, HttpResponseBadRequest
 from django.utils import timezone
 
 from drf_spectacular.types import OpenApiTypes
