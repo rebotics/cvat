@@ -3082,6 +3082,13 @@ def _export_annotations(
                 elif location == Location.LOCAL:
                     file_path = rq_job.return_value()
 
+                    if settings.USE_CACHE_S3:
+                        if s3_client.exists(file_path):
+                            rq_job.delete()
+                            return Response({'url': s3_client.get_presigned_url(file_path)}, status=status.HTTP_201_CREATED)
+                        else:
+                            return Response(f'Exported file {filename} not found on s3.', status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
                     if not file_path:
                         return Response('A result for exporting job was not found for finished RQ job', status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                     elif not osp.exists(file_path):

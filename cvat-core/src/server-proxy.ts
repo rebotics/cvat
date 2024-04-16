@@ -866,7 +866,7 @@ function exportDataset(instanceType: 'projects' | 'jobs' | 'tasks') {
                             setTimeout(request, 3000);
                         } else if (status === 201) {
                             params.action = 'download';
-                            resolve(`${baseURL}?${new URLSearchParams(params).toString()}`);
+                            resolve(response.data.url);
                         } else if (isCloudStorage && status === 200) {
                             resolve();
                         }

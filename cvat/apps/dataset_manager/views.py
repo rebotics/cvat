@@ -22,6 +22,8 @@ from cvat.apps.engine.models import Project, Task, Job
 from .formats.registry import EXPORT_FORMATS, IMPORT_FORMATS
 from .util import current_function_name
 
+from cvat.rebotics.s3_client import s3_client
+
 slogger = ServerLogManager(__name__)
 
 _MODULE_NAME = __package__ + '.' + osp.splitext(osp.basename(__file__))[0]
@@ -37,7 +39,7 @@ def get_export_cache_dir(db_instance):
     base_dir = osp.abspath(db_instance.get_dirname())
     return osp.join(base_dir, 'export_cache')
 
-DEFAULT_CACHE_TTL = timedelta(hours=4)
+DEFAULT_CACHE_TTL = timedelta(hours=2)
 TASK_CACHE_TTL = DEFAULT_CACHE_TTL
 PROJECT_CACHE_TTL = DEFAULT_CACHE_TTL / 3
 JOB_CACHE_TTL = DEFAULT_CACHE_TTL
@@ -67,6 +69,10 @@ def export(dst_format, project_id=None, task_id=None, job_id=None, server_url=No
             make_file_name(to_snake_case(dst_format)))
         output_path = '%s.%s' % (output_base, exporter.EXT)
         output_path = osp.join(cache_dir, output_path)
+
+        if settings.USE_CACHE_S3:
+            return export_to_s3(dst_format, db_instance, export_fn, output_base,
+                                server_url, save_images, cache_ttl, logger)
 
         instance_time = timezone.localtime(db_instance.updated_date).timestamp()
         if isinstance(db_instance, Project):
@@ -146,3 +152,45 @@ def get_all_formats():
         'importers': get_import_formats(),
         'exporters': get_export_formats(),
     }
+
+
+def export_to_s3(dst_format, db_instance, export_fn, output_base, server_url, save_images, cache_ttl, logger):
+    exporter = EXPORT_FORMATS[dst_format]
+    output_filename = f'{output_base}.{exporter.EXT}'
+    instance_type_name = type(db_instance).__name__.lower() + 's'
+    output_path = osp.join(settings.S3_CACHE_ROOT, 'export', instance_type_name, str(db_instance.pk), output_filename)
+    logger.info(f'Exporting {output_path} to s3.')
+
+    cache_info = s3_client.exists(output_path)
+    if cache_info is None or (timezone.now() - cache_info['LastModified']) >= cache_ttl:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_file = osp.join(temp_dir, output_filename)
+            export_fn(db_instance.id, temp_file, dst_format,
+                      server_url=server_url, save_images=save_images)
+            s3_client.upload_from_path(temp_file, output_path)
+
+        scheduler = django_rq.get_scheduler(settings.CVAT_QUEUES.EXPORT_DATA.value)
+        cleaning_job = scheduler.enqueue_in(time_delta=cache_ttl, func=clean_s3_cache,
+                                            file_path=output_path, cache_ttl=cache_ttl,
+                                            logger=logger)
+        logger.info(f'Exported successfully. Cleaning job {cleaning_job.id} scheduled in {cache_ttl}.')
+    else:
+        logger.info(f'Using cache.')
+
+    return output_path
+
+
+def clean_s3_cache(file_path, cache_ttl, logger):
+    logger.info(f'Removing export cache {file_path} from s3.')
+    try:
+        cache_info = s3_client.exists(file_path)
+        if cache_info is None:
+            logger.info(f'Cache does not exist')
+        elif (timezone.now() - cache_info['LastModified']) < cache_ttl:
+            logger.info(f'Cache is not expired yet.')
+        else:
+            s3_client.delete_object(file_path)
+            logger.info(f'Removed cache successfully.')
+    except Exception:
+        log_exception(logger)
+        raise

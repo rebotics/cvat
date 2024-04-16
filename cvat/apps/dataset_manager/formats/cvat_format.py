@@ -1371,14 +1371,14 @@ def dump_project_anno(dst_file: BufferedWriter, project_data: ProjectData, callb
     callback(dumper, project_data)
     dumper.close_document()
 
-def dump_s3_files(instance_data, img_dir: str):
+def dump_s3_files(instance_data: CommonData, img_dir: str):
     # does not work with video.
     # does not use project info for now.
     os.makedirs(img_dir, exist_ok=True)
 
     urls = []
     url_names = []
-    for file in instance_data.db_task.data.s3_files.all():
+    for file in instance_data._db_data.s3_files.all():
         urls.append(file.file.url)
         url_names.append({
             'name': file.file.name,

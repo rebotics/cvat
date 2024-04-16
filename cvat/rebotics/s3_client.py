@@ -144,6 +144,12 @@ class S3Client:
     def head_object(self, key: str):
         return self._client.head_object(Bucket=self.bucket, Key=self._key(key))
 
+    def exists(self, key: str):
+        try:
+            return self.head_object(key)
+        except:
+            pass
+
     def _key(self, key: str) -> str:
         return os.path.join(settings.AWS_LOCATION, key)
 
