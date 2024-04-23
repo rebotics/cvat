@@ -39,6 +39,8 @@ cmd_run() {
     exec supervisord -c "supervisord/$1.conf"
 }
 
+export SMOKESCREEN_OPTS="${SMOKESCREEN_OPTS:-}"
+
 if [ $# -eq 0 ]; then
     echo >&2 "$0: at least one subcommand required"
     echo >&2 ""
