@@ -1,5 +1,5 @@
 # Copyright (C) 2021-2022 Intel Corporation
-# Copyright (C) 2022 CVAT.ai Corporation
+# Copyright (C) 2022-2023 CVAT.ai Corporation
 #
 # SPDX-License-Identifier: MIT
 
@@ -7,27 +7,25 @@ from django.urls import path, re_path
 from django.conf import settings
 from django.urls.conf import include
 from dj_rest_auth.views import (
-    LoginView, LogoutView, PasswordChangeView,
+    LogoutView, PasswordChangeView,
     PasswordResetView, PasswordResetConfirmView)
-from allauth.account.views import ConfirmEmailView, EmailVerificationSentView
 from allauth.account import app_settings as allauth_settings
 
-from cvat.apps.iam.views import SigningView, RegisterViewEx
+from cvat.apps.iam.views import (
+    SigningView, RegisterViewEx, RulesView,
+    ConfirmEmailViewEx, LoginViewEx
+)
 
 urlpatterns = [
-    path('login', LoginView.as_view(), name='rest_login'),
+    path('login', LoginViewEx.as_view(), name='rest_login'),
     path('logout', LogoutView.as_view(), name='rest_logout'),
-    path('signing', SigningView.as_view(), name='signing')
+    path('signing', SigningView.as_view(), name='signing'),
+    path('rules', RulesView.as_view(), name='rules'),
 ]
 
-registrationEnabled = False
-
 if settings.IAM_TYPE == 'BASIC':
-    if registrationEnabled:
-        urlpatterns += [
-            path('register', RegisterViewEx.as_view(), name='rest_register'),
-        ]
     urlpatterns += [
+        # password
         path('password/reset', PasswordResetView.as_view(),
             name='rest_password_reset'),
         path('password/reset/confirm', PasswordResetConfirmView.as_view(),
@@ -37,11 +35,10 @@ if settings.IAM_TYPE == 'BASIC':
     ]
     if allauth_settings.EMAIL_VERIFICATION != \
        allauth_settings.EmailVerificationMethod.NONE:
+        # emails
         urlpatterns += [
-            re_path(r'^account-confirm-email/(?P<key>[-:\w]+)/$', ConfirmEmailView.as_view(),
+            re_path(r'^account-confirm-email/(?P<key>[-:\w]+)/$', ConfirmEmailViewEx.as_view(),
                 name='account_confirm_email'),
-            path('register/account-email-verification-sent', EmailVerificationSentView.as_view(),
-                name='account_email_verification_sent'),
         ]
 
 urlpatterns = [path('auth/', include(urlpatterns))]

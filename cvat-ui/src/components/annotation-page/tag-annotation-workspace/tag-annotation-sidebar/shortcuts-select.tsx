@@ -1,14 +1,14 @@
 // Copyright (C) 2020-2022 Intel Corporation
+// Copyright (C) 2022-2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
 import React, { useState, useEffect } from 'react';
-import { useSelector } from 'react-redux';
 import { Row, Col } from 'antd/lib/grid';
 import Text from 'antd/lib/typography/Text';
 import Select from 'antd/lib/select';
 
-import { CombinedState, DimensionType } from 'reducers';
+import { Label, DimensionType } from 'cvat-core-wrapper';
 import GlobalHotKeys, { KeyMap } from 'utils/mousetrap-react';
 import { shift } from 'utils/math';
 
@@ -18,6 +18,7 @@ interface ShortcutLabelMap {
 
 type Props = {
     onShortcutPress(event: KeyboardEvent | undefined, labelID: number): void;
+    labels: Label[];
 };
 
 const defaultShortcutLabelMap = {
@@ -33,9 +34,8 @@ const defaultShortcutLabelMap = {
     0: '',
 } as ShortcutLabelMap;
 
-const ShortcutsSelect = (props: Props): JSX.Element => {
-    const { onShortcutPress } = props;
-    const { labels } = useSelector((state: CombinedState) => state.annotation.job);
+function ShortcutsSelect(props: Props): JSX.Element {
+    const { labels, onShortcutPress } = props;
     const [shortcutLabelMap, setShortcutLabelMap] = useState(defaultShortcutLabelMap);
 
     const keyMap: KeyMap = {};
@@ -62,14 +62,14 @@ const ShortcutsSelect = (props: Props): JSX.Element => {
                 description: `Setup tag with "${label.name}" label`,
                 sequences: [`${id}`, `shift+${id}`],
                 action: 'keydown',
-                applicable: [DimensionType.DIM_2D, DimensionType.DIM_3D],
+                applicable: [DimensionType.DIMENSION_2D, DimensionType.DIMENSION_3D],
             };
 
             handlers[key] = (event: KeyboardEvent | undefined) => {
                 if (event) {
                     event.preventDefault();
                 }
-                onShortcutPress(event, label.id);
+                onShortcutPress(event, label.id as number);
             };
         });
 
@@ -115,6 +115,6 @@ const ShortcutsSelect = (props: Props): JSX.Element => {
                 ))}
         </div>
     );
-};
+}
 
 export default ShortcutsSelect;

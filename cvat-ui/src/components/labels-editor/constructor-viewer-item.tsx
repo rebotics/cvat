@@ -1,4 +1,5 @@
 // Copyright (C) 2020-2022 Intel Corporation
+// Copyright (C) 2023-2024 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
@@ -7,7 +8,8 @@ import { DeleteOutlined, EditOutlined } from '@ant-design/icons';
 import Text from 'antd/lib/typography/Text';
 
 import CVATTooltip from 'components/common/cvat-tooltip';
-import consts from 'consts';
+import { computeTextColor } from 'utils/compute-text-color';
+import config from 'config';
 import { LabelOptColor } from './common';
 
 interface ConstructorViewerItemProps {
@@ -22,11 +24,15 @@ export default function ConstructorViewerItem(props: ConstructorViewerItemProps)
         color, label, onUpdate, onDelete,
     } = props;
 
+    const backgroundColor = color || config.NEW_LABEL_COLOR;
+    const textColor = computeTextColor(backgroundColor);
+
     return (
-        <div style={{ background: color || consts.NEW_LABEL_COLOR }} className='cvat-constructor-viewer-item'>
-            <Text>{label.name}</Text>
+        <div style={{ background: backgroundColor }} className='cvat-constructor-viewer-item'>
+            <Text style={{ color: textColor }}>{label.name}</Text>
             <CVATTooltip title='Update attributes'>
                 <span
+                    style={{ color: textColor }}
                     role='button'
                     tabIndex={0}
                     onClick={(): void => onUpdate(label)}
@@ -37,6 +43,7 @@ export default function ConstructorViewerItem(props: ConstructorViewerItemProps)
             </CVATTooltip>
             <CVATTooltip title='Delete label'>
                 <span
+                    style={{ color: textColor }}
                     role='button'
                     tabIndex={0}
                     onClick={(): void => onDelete(label)}

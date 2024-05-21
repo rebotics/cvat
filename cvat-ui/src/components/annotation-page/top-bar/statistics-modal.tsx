@@ -1,18 +1,20 @@
 // Copyright (C) 2020-2022 Intel Corporation
+// Copyright (C) 2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
 import React from 'react';
 import { connect } from 'react-redux';
 import { Row, Col } from 'antd/lib/grid';
-import { ArrowRightOutlined, QuestionCircleOutlined, RightOutlined } from '@ant-design/icons';
+import { QuestionCircleOutlined } from '@ant-design/icons';
 import Table from 'antd/lib/table';
 import Modal from 'antd/lib/modal';
 import Spin from 'antd/lib/spin';
 import Text from 'antd/lib/typography/Text';
 
 import CVATTooltip from 'components/common/cvat-tooltip';
-import { CombinedState, DimensionType } from 'reducers';
+import { CombinedState } from 'reducers';
+import { DimensionType } from 'cvat-core-wrapper';
 import { showStatistics } from 'actions/annotation-actions';
 
 interface StateToProps {
@@ -85,7 +87,7 @@ function StatisticsModalComponent(props: StateToProps & DispatchToProps): JSX.El
         dimension,
     } = props;
 
-    const is2D = dimension === DimensionType.DIM_2D;
+    const is2D = dimension === DimensionType.DIMENSION_2D;
 
     const baseProps = {
         cancelButtonProps: { style: { display: 'none' } },
@@ -114,6 +116,7 @@ function StatisticsModalComponent(props: StateToProps & DispatchToProps): JSX.El
         ellipse: `${data.label[key].ellipse.shape} / ${data.label[key].ellipse.track}`,
         cuboid: `${data.label[key].cuboid.shape} / ${data.label[key].cuboid.track}`,
         skeleton: `${data.label[key].skeleton.shape} / ${data.label[key].skeleton.track}`,
+        mask: `${data.label[key].mask.shape}`,
         tag: data.label[key].tag,
         manually: data.label[key].manually,
         interpolated: data.label[key].interpolated,
@@ -130,6 +133,7 @@ function StatisticsModalComponent(props: StateToProps & DispatchToProps): JSX.El
         ellipse: `${data.total.ellipse.shape} / ${data.total.ellipse.track}`,
         cuboid: `${data.total.cuboid.shape} / ${data.total.cuboid.track}`,
         skeleton: `${data.total.skeleton.shape} / ${data.total.skeleton.track}`,
+        mask: `${data.total.mask.shape}`,
         tag: data.total.tag,
         manually: data.total.manually,
         interpolated: data.total.interpolated,
@@ -137,10 +141,8 @@ function StatisticsModalComponent(props: StateToProps & DispatchToProps): JSX.El
     });
 
     const makeShapesTracksTitle = (title: string): JSX.Element => (
-        <CVATTooltip title={is2D ? 'Shapes / Tracks' : 'Shapes'}>
-            <Text strong style={{ marginRight: 5 }}>
-                {title}
-            </Text>
+        <CVATTooltip title='Shapes / Tracks'>
+            <Text strong>{title}</Text>
             <QuestionCircleOutlined className='cvat-info-circle-icon' />
         </CVATTooltip>
     );
@@ -208,6 +210,12 @@ function StatisticsModalComponent(props: StateToProps & DispatchToProps): JSX.El
             title: makeShapesTracksTitle('Skeleton'),
             dataIndex: 'skeleton',
             key: 'skeleton',
+            width: 100,
+        },
+        {
+            title: makeShapesTracksTitle('Mask'),
+            dataIndex: 'mask',
+            key: 'mask',
             width: 100,
         },
         {

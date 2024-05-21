@@ -1,8 +1,7 @@
 # Copyright (C) 2019-2022 Intel Corporation
+# Copyright (C) 2023-2024 CVAT.ai Corporation
 #
 # SPDX-License-Identifier: MIT
-
-from tempfile import TemporaryDirectory
 
 from datumaro.components.dataset import Dataset
 from datumaro.components.extractor import ItemTransform
@@ -25,43 +24,45 @@ class DeleteImagePath(ItemTransform):
 
 
 @exporter(name="Datumaro", ext="ZIP", version="1.0")
-def _export(dst_file, instance_data, save_images=False):
-    dataset = Dataset.from_extractors(GetCVATDataExtractor(
-        instance_data=instance_data, include_images=save_images), env=dm_env)
-    if not save_images:
-        dataset.transform(DeleteImagePath)
-    with TemporaryDirectory() as tmp_dir:
-        dataset.export(tmp_dir, 'datumaro', save_images=save_images)
+def _export(dst_file, temp_dir, instance_data, save_images=False):
+    with GetCVATDataExtractor(instance_data=instance_data, include_images=save_images) as extractor:
+        dataset = Dataset.from_extractors(extractor, env=dm_env)
+        if not save_images:
+            dataset.transform(DeleteImagePath)
+        dataset.export(temp_dir, 'datumaro', save_images=save_images)
 
-        make_zip_archive(tmp_dir, dst_file)
+    make_zip_archive(temp_dir, dst_file)
 
 @importer(name="Datumaro", ext="ZIP", version="1.0")
-def _import(src_file, instance_data):
-    with TemporaryDirectory() as tmp_dir:
-        Archive(src_file.name).extractall(tmp_dir)
+def _import(src_file, temp_dir, instance_data, load_data_callback=None, **kwargs):
+    Archive(src_file.name).extractall(temp_dir)
 
-        dataset = Dataset.import_from(tmp_dir, 'datumaro', env=dm_env)
+    dataset = Dataset.import_from(temp_dir, 'datumaro', env=dm_env)
 
-        import_dm_annotations(dataset, instance_data)
+    if load_data_callback is not None:
+        load_data_callback(dataset, instance_data)
+    import_dm_annotations(dataset, instance_data)
 
 @exporter(name="Datumaro 3D", ext="ZIP", version="1.0", dimension=DimensionType.DIM_3D)
-def _export(dst_file, instance_data, save_images=False):
-    dataset = Dataset.from_extractors(GetCVATDataExtractor(
+def _export(dst_file, temp_dir, instance_data, save_images=False):
+    with GetCVATDataExtractor(
         instance_data=instance_data, include_images=save_images,
-            dimension=DimensionType.DIM_3D), env=dm_env)
+        dimension=DimensionType.DIM_3D,
+    ) as extractor:
+        dataset = Dataset.from_extractors(extractor, env=dm_env)
 
-    if not save_images:
-        dataset.transform(DeleteImagePath)
-    with TemporaryDirectory() as tmp_dir:
-        dataset.export(tmp_dir, 'datumaro', save_images=save_images)
+        if not save_images:
+            dataset.transform(DeleteImagePath)
+        dataset.export(temp_dir, 'datumaro', save_images=save_images)
 
-        make_zip_archive(tmp_dir, dst_file)
+    make_zip_archive(temp_dir, dst_file)
 
 @importer(name="Datumaro 3D", ext="ZIP", version="1.0", dimension=DimensionType.DIM_3D)
-def _import(src_file, instance_data):
-    with TemporaryDirectory() as tmp_dir:
-        Archive(src_file.name).extractall(tmp_dir)
+def _import(src_file, temp_dir, instance_data, load_data_callback=None, **kwargs):
+    Archive(src_file.name).extractall(temp_dir)
 
-        dataset = Dataset.import_from(tmp_dir, 'datumaro', env=dm_env)
+    dataset = Dataset.import_from(temp_dir, 'datumaro', env=dm_env)
 
-        import_dm_annotations(dataset, instance_data)
+    if load_data_callback is not None:
+        load_data_callback(dataset, instance_data)
+    import_dm_annotations(dataset, instance_data)

@@ -1,3 +1,7 @@
+// Copyright (C) 2022-2024 CVAT.ai Corporation
+//
+// SPDX-License-Identifier: MIT
+
 import React, { CSSProperties } from 'react';
 import PropTypes from 'prop-types';
 import { Row, Col } from 'antd/lib/grid';
@@ -15,8 +19,8 @@ import { PointIcon } from 'icons';
 import GlobalHotKeys from 'utils/mousetrap-react';
 import CVATTooltip from 'components/common/cvat-tooltip';
 import ShortcutsContext from 'components/shortcuts.context';
-import { ShapeType } from 'cvat-core-wrapper';
-import consts from 'consts';
+import { LabelType, ShapeType } from 'cvat-core-wrapper';
+import config from 'config';
 import {
     idGenerator, LabelOptColor, SkeletonConfiguration, toSVGCoord,
 } from './common';
@@ -55,7 +59,7 @@ export default class SkeletonConfigurator extends React.PureComponent<Props, Sta
 
     private canvasRef: React.RefObject<HTMLCanvasElement>;
     private svgRef: React.RefObject<SVGSVGElement>;
-    private canvasResizeObserver: ResizeObserver;
+    private resizeListener: EventListener;
     private nodeCounter: number;
     private elementCounter: number;
     private draggableElement: SVGElement | null;
@@ -77,30 +81,30 @@ export default class SkeletonConfigurator extends React.PureComponent<Props, Sta
         this.elementCounter = 0;
         this.draggableElement = null;
         this.labels = {};
-        this.canvasResizeObserver = new ResizeObserver((entries: ResizeObserverEntry[]) => {
-            const [canvasEntry] = entries;
-            (canvasEntry.target as HTMLCanvasElement).style.height = `${canvasEntry.target.clientWidth}px`;
-            (canvasEntry.target as HTMLCanvasElement).height = canvasEntry.target.clientWidth;
-            (canvasEntry.target as HTMLCanvasElement).width = canvasEntry.target.clientWidth;
-            if (this.svgRef.current) {
-                (this.svgRef.current as SVGSVGElement).style.width = `${canvasEntry.target.clientWidth}px`;
-                (this.svgRef.current as SVGSVGElement).style.height = `${canvasEntry.target.clientWidth}px`;
+        this.resizeListener = () => {
+            const canvas = this.canvasRef.current;
+            const svg = this.svgRef.current;
+            if (canvas && svg) {
+                const { clientWidth } = canvas;
+                canvas.style.height = `${clientWidth}px`;
+                canvas.height = clientWidth;
+                canvas.width = clientWidth;
+                svg.style.width = `${clientWidth}px`;
+                svg.style.height = `${clientWidth}px`;
             }
             this.setCanvasBackground();
-        });
+        };
     }
 
     public componentDidMount(): void {
-        const { canvasRef, svgRef } = this;
+        const { svgRef } = this;
         const { label } = this.props;
-        const canvas = canvasRef.current;
         const svg = svgRef.current;
 
-        if (canvas) {
-            this.canvasResizeObserver.observe(canvas);
-        }
-
+        window.addEventListener('resize', this.resizeListener);
         window.document.addEventListener('mouseup', this.onDocumentMouseUp);
+        window.dispatchEvent(new Event('resize'));
+
         if (svg) {
             svg.setAttribute('viewBox', '0 0 100 100');
             svg.addEventListener('mousedown', this.onSVGClick);
@@ -120,6 +124,7 @@ export default class SkeletonConfigurator extends React.PureComponent<Props, Sta
                     const elementID = element.getAttribute('data-element-id');
                     const labelName = element.getAttribute('data-label-name');
                     const labelID = element.getAttribute('data-label-id');
+
                     if (elementID && (labelName !== null || labelID !== null)) {
                         const sublabel = sublabels.find((_sublabel: LabelOptColor): boolean => {
                             if (labelName !== null) {
@@ -164,7 +169,7 @@ export default class SkeletonConfigurator extends React.PureComponent<Props, Sta
         }
 
         window.document.removeEventListener('mouseup', this.onDocumentMouseUp);
-        this.canvasResizeObserver.disconnect();
+        window.removeEventListener('resize', this.resizeListener);
     }
 
     private onDocumentMouseUp = (): void => {
@@ -238,6 +243,11 @@ export default class SkeletonConfigurator extends React.PureComponent<Props, Sta
             return false;
         }
 
+        setAttributes(edge, {
+            stroke: 'black',
+            'stroke-width': '0.5',
+        });
+
         const onClick = (): void => {
             if (edge) {
                 edge.remove();
@@ -277,13 +287,24 @@ export default class SkeletonConfigurator extends React.PureComponent<Props, Sta
         this.elementCounter = Math.max(this.elementCounter, elementID);
         this.nodeCounter = Math.max(this.nodeCounter, nodeID);
 
+        setAttributes(circle, {
+            stroke: 'black',
+            fill: config.NEW_LABEL_COLOR,
+            'stroke-width': 0.1,
+        });
+
+        circle.style.transition = 'r 0.25s';
+
         circle.addEventListener('mouseover', () => {
             circle.setAttribute('stroke-width', '0.3');
+            circle.setAttribute('r', '1');
             const text = svg.querySelector(`text[data-for-element-id="${elementID}"]`);
             if (text) {
                 text.setAttribute('fill', 'red');
             }
+        });
 
+        circle.addEventListener('contextmenu', () => {
             this.setState({
                 contextMenuElement: elementID,
             });
@@ -291,6 +312,7 @@ export default class SkeletonConfigurator extends React.PureComponent<Props, Sta
 
         circle.addEventListener('mouseout', () => {
             circle.setAttribute('stroke-width', '0.1');
+            circle.setAttribute('r', '0.75');
             const text = svg.querySelector(`text[data-for-element-id="${elementID}"]`);
             if (text) {
                 text.setAttribute('fill', 'darkorange');
@@ -400,7 +422,8 @@ export default class SkeletonConfigurator extends React.PureComponent<Props, Sta
             }),
             color: labels[elementID]?.color || undefined,
             id: (labels[elementID]?.id || 0) > 0 ? labels[elementID].id : idGenerator(),
-            type: ShapeType.POINTS,
+            type: ShapeType.POINTS as any as LabelType,
+            has_parent: true,
         };
 
         return true;
@@ -427,16 +450,14 @@ export default class SkeletonConfigurator extends React.PureComponent<Props, Sta
             const elementID = this.elementCounter + 1;
             const nodeID = this.nodeCounter + 1;
             setAttributes(circle, {
-                r: 1.5,
-                stroke: 'black',
-                fill: consts.NEW_LABEL_COLOR,
+                r: 0.75,
                 cx: x,
                 cy: y,
-                'stroke-width': 0.1,
                 'data-type': 'element node',
                 'data-element-id': elementID,
                 'data-node-id': nodeID,
             });
+
             svg.appendChild(circle);
 
             if (this.setupCircle(svg, circle)) {
@@ -452,7 +473,7 @@ export default class SkeletonConfigurator extends React.PureComponent<Props, Sta
         const svg = svgRef.current;
 
         if (svg) {
-            const TEXT_MARGIN = 2;
+            const TEXT_MARGIN = 1;
             const array = Array.from(svg.children);
             array.forEach((el: Element) => {
                 if (el.tagName === 'text') {
@@ -612,16 +633,21 @@ export default class SkeletonConfigurator extends React.PureComponent<Props, Sta
             );
         }
 
-        try {
-            this.setupTextLabels(false);
-            return {
-                type: 'skeleton',
-                svg: svg.innerHTML,
-                sublabels,
-            };
-        } finally {
-            this.setupTextLabels();
-        }
+        const svgText = Array.from(svg.children)
+            .filter((element) => element.tagName === 'circle' || element.tagName === 'line').map((element) => {
+                const clone = element.cloneNode() as SVGCircleElement;
+                clone.removeAttribute('style');
+                clone.removeAttribute('stroke');
+                clone.removeAttribute('fill');
+                clone.removeAttribute('stroke-width');
+                return clone.outerHTML;
+            }).join('\n');
+
+        return {
+            type: 'skeleton',
+            svg: svgText,
+            sublabels,
+        };
     }
 
     public render(): JSX.Element {
@@ -663,29 +689,33 @@ export default class SkeletonConfigurator extends React.PureComponent<Props, Sta
                         onConfigureLabel={(elementID: number, data: LabelOptColor | null) => {
                             this.setState({ contextMenuVisible: false });
                             if (data) {
-                                this.labels[elementID] = data;
+                                this.labels[elementID] = {
+                                    ...data,
+                                    has_parent: true,
+                                };
+
                                 if (data.color && svgRef.current) {
                                     const element = svgRef.current.querySelector(`[data-element-id="${elementID}"]`);
                                     if (element) {
                                         element.setAttribute('fill', data.color);
                                     }
                                 }
+
                                 this.setupTextLabels();
                             }
-                        }}
-                        onCancel={() => {
-                            this.setState({ contextMenuVisible: false });
                         }}
                     />
                 ) : null}
                 <div>
                     <div className='cvat-skeleton-configurator-image-dragger'>
                         <Upload
+                            accept='.jpg,.jpeg,.png'
                             showUploadList={false}
                             beforeUpload={(file: RcFile) => {
-                                if (!file.type.startsWith('image/')) {
+                                if (!['image/jpeg', 'image/png'].includes(file.type)) {
                                     notification.error({
-                                        message: `File must be an image. Got mime type: ${file.type}`,
+                                        message:
+                                            `File must be a JPEG or PNG image. Detected mime type is "${file.type}"`,
                                     });
                                 }
                                 this.setState({ image: file }, () => {
@@ -696,7 +726,7 @@ export default class SkeletonConfigurator extends React.PureComponent<Props, Sta
                         >
                             <p className='ant-upload-drag-icon'>
                                 <CVATTooltip title='Upload a background image'>
-                                    <Button icon={<PictureOutlined />} />
+                                    <Button className='cvat-upload-skeleton-constructor-background' icon={<PictureOutlined />} />
                                 </CVATTooltip>
                             </p>
                         </Upload>
@@ -742,6 +772,7 @@ export default class SkeletonConfigurator extends React.PureComponent<Props, Sta
                     <Row justify='space-between' className='cvat-skeleton-configurator-svg-buttons'>
                         <CVATTooltip title='Download skeleton as SVG'>
                             <Button
+                                className='cvat-download-skeleton-svg-button'
                                 type='default'
                                 icon={<DownloadOutlined />}
                                 onClick={() => {
@@ -750,13 +781,20 @@ export default class SkeletonConfigurator extends React.PureComponent<Props, Sta
                                         const copy = window.document.createElementNS('http://www.w3.org/2000/svg', 'svg');
                                         // eslint-disable-next-line no-unsanitized/property
                                         copy.innerHTML = svgRef.current.innerHTML;
+                                        copy.setAttribute('viewBox', '0 0 100 100');
                                         this.setupTextLabels();
 
                                         const desc = window.document.createElementNS('http://www.w3.org/2000/svg', 'desc');
                                         desc.setAttribute('data-description-type', 'labels-specification');
-                                        (desc as SVGDescElement).textContent = JSON.stringify(this.labels);
+                                        const stringifiedLabels = JSON
+                                            .stringify(this.labels, (key: string, value: any) => {
+                                                if (key === 'id') return undefined;
+                                                return value;
+                                            });
+                                        (desc as SVGDescElement).textContent = stringifiedLabels;
                                         copy.appendChild(desc);
                                         Array.from(copy.children).forEach((child: Element) => {
+                                            child.removeAttribute('style');
                                             if (child.hasAttribute('data-label-id')) {
                                                 const elementID = +(child.getAttribute('data-element-id') as string);
                                                 child.removeAttribute('data-label-id');
@@ -764,7 +802,7 @@ export default class SkeletonConfigurator extends React.PureComponent<Props, Sta
                                             }
                                         });
 
-                                        const text = copy.innerHTML;
+                                        const text = copy.outerHTML;
                                         const blob = new Blob([text], { type: 'image/svg+xml;charset=utf-8' });
                                         const url = URL.createObjectURL(blob);
                                         const anchor = window.document.getElementById('downloadAnchor');
@@ -782,11 +820,18 @@ export default class SkeletonConfigurator extends React.PureComponent<Props, Sta
                         <Upload
                             disabled={disabled}
                             showUploadList={false}
+                            accept='.svg'
                             beforeUpload={(file: RcFile) => {
                                 file.text().then((result) => {
                                     const tmpSvg = window.document.createElementNS('http://www.w3.org/2000/svg', 'svg');
                                     // eslint-disable-next-line no-unsanitized/property
                                     tmpSvg.innerHTML = result;
+
+                                    if (tmpSvg.children[0]?.tagName === 'svg') {
+                                        // eslint-disable-next-line no-unsanitized/property
+                                        tmpSvg.innerHTML = tmpSvg.children[0].innerHTML;
+                                    }
+
                                     let isSVG = true;
                                     for (let c = tmpSvg.childNodes, i = c.length; i--;) {
                                         isSVG = isSVG && c[i].nodeType === 1;
@@ -819,7 +864,12 @@ export default class SkeletonConfigurator extends React.PureComponent<Props, Sta
                             }}
                         >
                             <CVATTooltip title='Upload a skeleton from SVG'>
-                                <Button style={disabledStyle} icon={<UploadOutlined />} type='default' />
+                                <Button
+                                    className='cvat-upload-skeleton-svg-button'
+                                    style={disabledStyle}
+                                    icon={<UploadOutlined />}
+                                    type='default'
+                                />
                             </CVATTooltip>
                         </Upload>
                     </Row>

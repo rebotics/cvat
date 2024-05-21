@@ -27,7 +27,6 @@ import data.organizations
 #         "project": {
 #             "owner": { "id": num },
 #         } or null,
-#         "num_resources": <num>
 #     }
 # }
 #
@@ -40,7 +39,7 @@ is_webhook_owner {
     input.resource.owner.id == input.auth.user.id
 }
 
-default allow = false
+default allow := false
 
 allow {
     utils.is_admin
@@ -51,9 +50,7 @@ allow {
     utils.is_sandbox
     utils.has_perm(utils.USER)
     is_project_owner
-    input.resource.num_resources < 10
 }
-
 
 allow {
     input.scope == utils.LIST
@@ -65,23 +62,23 @@ allow {
     organizations.is_member
 }
 
-filter = [] { # Django Q object to filter list of entries
+filter := [] { # Django Q object to filter list of entries
     utils.is_admin
     utils.is_sandbox
-} else = qobject {
+} else := qobject {
     utils.is_admin
     utils.is_organization
     qobject := [ {"organization": input.auth.organization.id} ]
-} else = qobject {
+} else := qobject {
     utils.is_sandbox
     user := input.auth.user
     qobject := [ {"owner_id": user.id}, {"project__owner_id": user.id}, "|" ]
-} else = qobject {
+} else := qobject {
     utils.is_organization
     utils.has_perm(utils.WORKER)
     organizations.has_perm(organizations.MAINTAINER)
     qobject := [ {"organization": input.auth.organization.id} ]
-} else = qobject {
+} else := qobject {
     utils.is_organization
     utils.has_perm(utils.WORKER)
     organizations.has_perm(organizations.WORKER)
@@ -152,7 +149,6 @@ allow {
     input.auth.organization.id == input.resource.organization.id
     utils.has_perm(utils.WORKER)
     organizations.has_perm(organizations.MAINTAINER)
-    input.resource.num_resources < 10
 }
 
 allow {
@@ -168,6 +164,5 @@ allow {
     input.auth.organization.id == input.resource.organization.id
     utils.has_perm(utils.WORKER)
     organizations.has_perm(organizations.WORKER)
-    input.resource.num_resources < 10
     is_project_owner
 }

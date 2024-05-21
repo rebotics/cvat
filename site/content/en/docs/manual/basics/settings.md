@@ -1,7 +1,7 @@
 ---
 title: 'Settings'
 linkTitle: 'Settings'
-weight: 13
+weight: 15
 ---
 To open the settings open the user menu in the header and select the settings item or press `F2`.
 
@@ -61,7 +61,7 @@ In tab `Workspace` you can:
   for shape in the attribute annotation mode.
 
 - `Control points size` — defines a size of any interactable points in the tool
-(polygon's vertexes, rectangle dragging points, etc.)
+(polygon's vertices, rectangle dragging points, etc.)
 
 - `Default number of points in polygon approximation`
   With this setting, you can choose the default number of points in polygon.

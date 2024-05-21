@@ -1,4 +1,5 @@
 // Copyright (C) 2020-2022 Intel Corporation
+// Copyright (C) 2024 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
@@ -49,7 +50,7 @@ function mapStateToProps(state: CombinedState, own: OwnProps): StateToProps {
     } = state;
 
     return {
-        job: jobID === requestedId ? job : null,
+        job: jobID === requestedId || (Number.isNaN(jobID) && Number.isNaN(requestedId)) ? job : null,
         fetching,
         workspace,
         frameNumber,
@@ -62,14 +63,9 @@ function mapDispatchToProps(dispatch: any, own: OwnProps): DispatchToProps {
     const jobID = +params.jid;
     const searchParams = new URLSearchParams(window.location.search);
     const initialFilters: object[] = [];
-    let initialFrame: number | null = null;
-
-    if (searchParams.has('frame')) {
-        const searchFrame = +(searchParams.get('frame') as string);
-        if (!Number.isNaN(searchFrame)) {
-            initialFrame = searchFrame;
-        }
-    }
+    const initialOpenGuide = searchParams.has('openGuide');
+    const parsedFrame = +(searchParams.get('frame') || 'NaN');
+    const initialFrame = Number.isInteger(parsedFrame) && parsedFrame >= 0 ? parsedFrame : null;
 
     if (searchParams.has('serverID') && searchParams.has('type')) {
         const serverID = searchParams.get('serverID');
@@ -81,13 +77,19 @@ function mapDispatchToProps(dispatch: any, own: OwnProps): DispatchToProps {
         }
     }
 
-    if (searchParams.has('frame') || searchParams.has('object')) {
+    if (searchParams.size) {
         own.history.replace(own.history.location.pathname);
     }
 
     return {
         getJob(): void {
-            dispatch(getJobAsync(taskID, jobID, initialFrame, initialFilters));
+            dispatch(getJobAsync({
+                taskID,
+                jobID,
+                initialFrame,
+                initialFilters,
+                initialOpenGuide,
+            }));
         },
         saveLogs(): void {
             dispatch(saveLogsAsync());

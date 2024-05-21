@@ -1,13 +1,11 @@
 # Copyright (C) 2018-2022 Intel Corporation
-# Copyright (C) 2022 CVAT.ai Corporation
+# Copyright (C) 2022-2023 CVAT.ai Corporation
 #
 # SPDX-License-Identifier: MIT
 
 from django.urls import path, include
 from . import views
 from rest_framework import routers
-
-from cvat.apps.restrictions.views import RestrictionsViewSet
 
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 
@@ -19,10 +17,15 @@ router.register('users', views.UserViewSet)
 router.register('server', views.ServerViewSet, basename='server')
 router.register('issues', views.IssueViewSet)
 router.register('comments', views.CommentViewSet)
-router.register('restrictions', RestrictionsViewSet, basename='restrictions')
+router.register('labels', views.LabelViewSet)
 router.register('cloudstorages', views.CloudStorageViewSet)
+router.register('assets', views.AssetsViewSet)
+router.register('guides', views.AnnotationGuidesViewSet)
 
 urlpatterns = [
+    # Entry point for a client
+    # replaced with custom index.
+
     # documentation for API
     path('api/schema/', SpectacularAPIView.as_view(
         permission_classes=[] # This endpoint is available for everyone

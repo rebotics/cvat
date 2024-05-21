@@ -8,7 +8,7 @@ import { CombinedState } from 'reducers';
 import { getCore, Storage } from 'cvat-core-wrapper';
 import { LogType } from 'cvat-logger';
 import { getProjectsAsync } from './projects-actions';
-import { jobInfoGenerator, receiveAnnotationsParameters, AnnotationActionTypes } from './annotation-actions';
+import { AnnotationActionTypes, fetchAnnotationsAsync } from './annotation-actions';
 
 const core = getCore();
 
@@ -70,6 +70,7 @@ export const importDatasetAsync = (
     useDefaultSettings: boolean,
     sourceStorage: Storage,
     file: File | string,
+    convMaskToPoly: boolean,
 ): ThunkAction => (
     async (dispatch, getState) => {
         const resource = instance instanceof core.classes.Project ? 'dataset' : 'annotation';
@@ -83,18 +84,20 @@ export const importDatasetAsync = (
                 }
                 dispatch(importActions.importDataset(instance, format));
                 await instance.annotations
-                    .importDataset(format, useDefaultSettings, sourceStorage, file,
-                        (message: string, progress: number) => (
+                    .importDataset(format, useDefaultSettings, sourceStorage, file, {
+                        convMaskToPoly,
+                        updateStatusCallback: (message: string, progress: number) => (
                             dispatch(importActions.importDatasetUpdateStatus(
                                 instance, Math.floor(progress * 100), message,
                             ))
-                        ));
+                        ),
+                    });
             } else if (instance instanceof core.classes.Task) {
                 if (state.import.tasks.dataset.current?.[instance.id]) {
                     throw Error('Only one importing of annotation/dataset allowed at the same time');
                 }
                 dispatch(importActions.importDataset(instance, format));
-                await instance.annotations.upload(format, useDefaultSettings, sourceStorage, file);
+                await instance.annotations.upload(format, useDefaultSettings, sourceStorage, file, { convMaskToPoly });
             } else { // job
                 if (state.import.tasks.dataset.current?.[instance.taskId]) {
                     throw Error('Annotations is being uploaded for the task');
@@ -102,23 +105,17 @@ export const importDatasetAsync = (
                 if (state.import.jobs.dataset.current?.[instance.id]) {
                     throw Error('Only one uploading of annotations for a job allowed at the same time');
                 }
-                const { filters, showAllInterpolationTracks } = receiveAnnotationsParameters();
 
                 dispatch(importActions.importDataset(instance, format));
 
-                const frame = state.annotation.player.frame.number;
-                await instance.annotations.upload(format, useDefaultSettings, sourceStorage, file);
-
-                await instance.logger.log(LogType.uploadAnnotations, {
-                    ...(await jobInfoGenerator(instance)),
-                });
-
+                await instance.annotations.upload(format, useDefaultSettings, sourceStorage, file, { convMaskToPoly });
+                await instance.logger.log(LogType.uploadAnnotations);
                 await instance.annotations.clear(true);
                 await instance.actions.clear();
                 const history = await instance.actions.get();
 
-                // One more update to escape some problems
-                // in canvas when shape with the same
+                // first set empty objects list
+                // to escape some problems in canvas when shape with the same
                 // clientID has different type (polygon, rectangle) for example
                 dispatch({
                     type: AnnotationActionTypes.UPLOAD_JOB_ANNOTATIONS_SUCCESS,
@@ -128,16 +125,8 @@ export const importDatasetAsync = (
                     },
                 });
 
-                const states = await instance.annotations.get(frame, showAllInterpolationTracks, filters);
-
                 setTimeout(() => {
-                    dispatch({
-                        type: AnnotationActionTypes.UPLOAD_JOB_ANNOTATIONS_SUCCESS,
-                        payload: {
-                            history,
-                            states,
-                        },
-                    });
+                    dispatch(fetchAnnotationsAsync());
                 });
             }
         } catch (error) {
@@ -156,8 +145,8 @@ export const importBackupAsync = (instanceType: 'project' | 'task', storage: Sto
     async (dispatch) => {
         dispatch(importActions.importBackup());
         try {
-            const inctanceClass = (instanceType === 'task') ? core.classes.Task : core.classes.Project;
-            const instance = await inctanceClass.restore(storage, file);
+            const instanceClass = (instanceType === 'task') ? core.classes.Task : core.classes.Project;
+            const instance = await instanceClass.restore(storage, file);
             dispatch(importActions.importBackupSuccess(instance.id, instanceType));
         } catch (error) {
             dispatch(importActions.importBackupFailed(instanceType, error));

@@ -11,7 +11,7 @@ interface OwnProps {
 }
 
 export default function withVisibilityHandling(WrappedComponent: typeof Popover, popoverType: string) {
-    return (props: OwnProps & PopoverProps): JSX.Element => {
+    return function (props: OwnProps & PopoverProps): JSX.Element {
         const [visible, setVisible] = useState<boolean>(false);
         const { overlayClassName, onVisibleChange, ...rest } = props;
         const overlayClassNames = typeof overlayClassName === 'string' ? overlayClassName.split(/\s+/) : [];
@@ -27,7 +27,7 @@ export default function withVisibilityHandling(WrappedComponent: typeof Popover,
                     animationDuration: '0s',
                     animationDelay: '0s',
                 }}
-                trigger={visible ? 'click' : 'hover'}
+                trigger={visible ? ['click'] : ['click', 'hover']}
                 overlayClassName={overlayClassNames.join(' ').trim()}
                 onVisibleChange={(_visible: boolean) => {
                     if (_visible) {

@@ -1,6 +1,11 @@
-# Copyright (C) 2022 CVAT.ai Corporation
+# Copyright (C) 2022-2023 CVAT.ai Corporation
 #
 # SPDX-License-Identifier: MIT
+
+from rest_framework import serializers
+
+from cvat.apps.engine.models import Project
+from cvat.apps.engine.serializers import BasicUserSerializer, WriteOnceMixin
 
 from .event_type import EventTypeChoice, ProjectEvents, OrganizationEvents
 from .models import (
@@ -9,8 +14,6 @@ from .models import (
     WebhookTypeChoice,
     WebhookDelivery,
 )
-from rest_framework import serializers
-from cvat.apps.engine.serializers import BasicUserSerializer, WriteOnceMixin
 
 
 class EventTypeValidator:
@@ -56,10 +59,11 @@ class EventsSerializer(serializers.Serializer):
 
 
 class WebhookReadSerializer(serializers.ModelSerializer):
-    owner = BasicUserSerializer(read_only=True, required=False)
+    owner = BasicUserSerializer(read_only=True, required=False, allow_null=True)
 
     events = EventTypesSerializer(read_only=True)
 
+    project_id = serializers.IntegerField(required=False, allow_null=True)
     type = serializers.ChoiceField(choices=WebhookTypeChoice.choices())
     content_type = serializers.ChoiceField(choices=WebhookContentTypeChoice.choices())
 
@@ -85,22 +89,20 @@ class WebhookReadSerializer(serializers.ModelSerializer):
             "created_date",
             "updated_date",
             "owner",
-            "project",
+            "project_id",
             "organization",
             "events",
             "last_status",
             "last_delivery_date",
         )
         read_only_fields = fields
+        extra_kwargs = {
+            "organization": {"allow_null": True},
+        }
 
 
 class WebhookWriteSerializer(WriteOnceMixin, serializers.ModelSerializer):
     events = EventTypesSerializer(write_only=True)
-
-    # Q: should be owner_id required or not?
-    owner_id = serializers.IntegerField(
-        write_only=True, allow_null=True, required=False
-    )
 
     project_id = serializers.IntegerField(
         write_only=True, allow_null=True, required=False
@@ -120,14 +122,16 @@ class WebhookWriteSerializer(WriteOnceMixin, serializers.ModelSerializer):
             "secret",
             "is_active",
             "enable_ssl",
-            "owner_id",
             "project_id",
             "events",
         )
-        write_once_fields = ("type", "owner_id", "project_id")
+        write_once_fields = ("type", "project_id")
         validators = [EventTypeValidator()]
 
     def create(self, validated_data):
+        if (project_id := validated_data.get('project_id')) is not None:
+            validated_data['organization'] = Project.objects.get(pk=project_id).organization
+
         db_webhook = Webhook.objects.create(**validated_data)
         return db_webhook
 

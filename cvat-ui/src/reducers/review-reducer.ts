@@ -2,16 +2,19 @@
 //
 // SPDX-License-Identifier: MIT
 
-import consts from 'consts';
+import config from 'config';
 import { AnnotationActionTypes } from 'actions/annotation-actions';
 import { ReviewActionTypes } from 'actions/review-actions';
 import { AuthActionTypes } from 'actions/auth-actions';
+import { QualityConflict } from 'cvat-core-wrapper';
 import { ReviewState } from '.';
 
 const defaultState: ReviewState = {
     issues: [],
     latestComments: [],
     frameIssues: [], // saved on the server and not saved on the server
+    conflicts: [],
+    frameConflicts: [],
     newIssuePosition: null,
     issuesHidden: false,
     issuesResolvedHidden: false,
@@ -26,14 +29,18 @@ export default function (state: ReviewState = defaultState, action: any): Review
         case AnnotationActionTypes.GET_JOB_SUCCESS: {
             const {
                 issues,
+                conflicts,
                 frameData: { number: frame },
             } = action.payload;
             const frameIssues = issues.filter((issue: any): boolean => issue.frame === frame);
+            const frameConflicts = conflicts.filter((conflict: QualityConflict): boolean => conflict.frame === frame);
 
             return {
                 ...state,
                 issues,
                 frameIssues,
+                conflicts,
+                frameConflicts,
             };
         }
         case AnnotationActionTypes.CHANGE_FRAME: {
@@ -78,9 +85,15 @@ export default function (state: ReviewState = defaultState, action: any): Review
         }
         case AnnotationActionTypes.CHANGE_FRAME_SUCCESS: {
             const { number: frame } = action.payload;
+            let frameConflicts: QualityConflict[] = [];
+            if (state.conflicts.length) {
+                frameConflicts = state.conflicts.filter((conflict) => conflict.frame === frame);
+            }
+
             return {
                 ...state,
                 frameIssues: state.issues.filter((issue: any): boolean => issue.frame === frame),
+                frameConflicts,
             };
         }
         case ReviewActionTypes.START_ISSUE: {
@@ -103,12 +116,12 @@ export default function (state: ReviewState = defaultState, action: any): Review
                         new Set(
                             [...state.latestComments, issue.comments[0].message].filter(
                                 (message: string): boolean => ![
-                                    consts.QUICK_ISSUE_INCORRECT_POSITION_TEXT,
-                                    consts.QUICK_ISSUE_INCORRECT_ATTRIBUTE_TEXT,
+                                    config.QUICK_ISSUE_INCORRECT_POSITION_TEXT,
+                                    config.QUICK_ISSUE_INCORRECT_ATTRIBUTE_TEXT,
                                 ].includes(message),
                             ),
                         ),
-                    ).slice(-consts.LATEST_COMMENTS_SHOWN_QUICK_ISSUE),
+                    ).slice(-config.LATEST_COMMENTS_SHOWN_QUICK_ISSUE),
                 frameIssues,
                 issues,
                 newIssuePosition: null,

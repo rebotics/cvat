@@ -14,7 +14,8 @@ import Button from 'antd/lib/button';
 
 import ColorPicker from 'components/annotation-page/standard-workspace/objects-side-bar/color-picker';
 import { ColorizeIcon } from 'icons';
-import { ColorBy, CombinedState, DimensionType } from 'reducers';
+import { ColorBy, CombinedState, Workspace } from 'reducers';
+import { DimensionType } from 'cvat-core-wrapper';
 import { collapseAppearance as collapseAppearanceAction } from 'actions/annotation-actions';
 import {
     changeShapesColorBy as changeShapesColorByAction,
@@ -35,6 +36,7 @@ interface StateToProps {
     outlineColor: string;
     showBitmap: boolean;
     showProjections: boolean;
+    workspace: Workspace;
     jobInstance: any;
     lineWidth: number;
 }
@@ -54,6 +56,7 @@ function mapStateToProps(state: CombinedState): StateToProps {
     const {
         annotation: {
             appearanceCollapsed,
+            workspace,
             job: { instance: jobInstance },
         },
         settings: {
@@ -72,6 +75,7 @@ function mapStateToProps(state: CombinedState): StateToProps {
         outlineColor,
         showBitmap,
         showProjections,
+        workspace,
         jobInstance,
         lineWidth,
     };
@@ -130,7 +134,7 @@ function AppearanceBlock(props: Props): JSX.Element {
         changeLineWidth,
     } = props;
 
-    const is2D = jobInstance.dimension === DimensionType.DIM_2D;
+    const is2D = jobInstance.dimension === DimensionType.DIMENSION_2D;
 
     return (
         <Collapse

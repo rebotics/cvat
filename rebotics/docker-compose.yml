@@ -3,7 +3,7 @@ version: '3.3'
 services:
   cvat_db:
     container_name: reb_cvat_db
-    image: postgres:10-alpine
+    image: postgres:15-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: root
@@ -16,16 +16,18 @@ services:
         aliases:
           - postgres
     ports:
-      - 5438:5432
+      - "5438:5432"
 
   cvat_redis:
     container_name: reb_cvat_redis
-    image: redis:4.0-alpine
+    image: redis:7.2.3-alpine
     restart: unless-stopped
     networks:
       reb_cvat:
         aliases:
           - redis
+    ports:
+      - "6385:6379"
 
   cvat_server:
     container_name: reb_cvat
@@ -40,7 +42,8 @@ services:
       # create this if it does not exist, based on example
       .env.local
     environment:
-      no_proxy: 'elasticsearch,kibana,logstash,nuclio,opa,${no_proxy}'
+      no_proxy: clickhouse,grafana,vector,nuclio,opa,${no_proxy:-}
+    command: init run server
     volumes:
       - reb_cvat_data:/home/django/data
     ports:
@@ -50,6 +53,8 @@ services:
       - reboticsadmin_default
       - rebotics-management-django_default
 
+  # cvat_utils container - for what?
+
   cvat_opa:
     container_name: reb_cvat_opa
     image: retechlabs/rebotics-cvat-opa:${VERSION:-latest}
@@ -58,6 +63,8 @@ services:
       reb_cvat:
         aliases:
           - opa
+    ports:
+      - "8181:8181"
 
   cvat_minio:
     container_name: reb_cvat_minio
@@ -75,7 +82,7 @@ services:
         aliases:
           - minio
     ports:
-      - 9006:9006
+      - "9006:9006"
 
 volumes:
   reb_cvat_db:

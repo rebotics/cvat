@@ -1,60 +1,17 @@
 // Copyright (C) 2020-2022 Intel Corporation
+// Copyright (C) 2022-2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
-@import 'base.scss';
+@import 'base';
 
 .cvat-standard-workspace.ant-layout {
     height: 100%;
-}
 
-.cvat-context-image-wrapper {
-    height: auto;
-    width: $grid-unit-size * 32;
-    position: absolute;
-    top: $grid-unit-size;
-    right: $grid-unit-size;
-    z-index: 100;
-    background: black;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    user-select: none;
-
-    > .cvat-context-image-wrapper-header {
-        height: $grid-unit-size * 4;
-        width: 100%;
-        z-index: 101;
-        background: rgba(0, 0, 0, 0.2);
-        position: absolute;
-        top: 0;
-        left: 0;
+    > .ant-layout-content {
+        overflow-y: hidden;
+        overflow-x: hidden;
     }
-
-    > .ant-image {
-        margin: $grid-unit-size * 0.5;
-    }
-
-    > span {
-        position: absolute;
-        font-size: 18px;
-        top: 7px;
-        right: 7px;
-        z-index: 102;
-        color: white;
-
-        &:hover {
-            > svg {
-                transform: scale(1.2);
-            }
-        }
-    }
-}
-
-.cvat-context-image {
-    width: 100%;
-    height: auto;
-    display: block;
 }
 
 .cvat-objects-sidebar-sider {
@@ -115,11 +72,14 @@
 .cvat-draw-polyline-control,
 .cvat-draw-points-control,
 .cvat-draw-ellipse-control,
+.cvat-draw-mask-control,
 .cvat-draw-cuboid-control,
 .cvat-draw-skeleton-control,
 .cvat-setup-tag-control,
 .cvat-merge-control,
 .cvat-group-control,
+.cvat-join-control,
+.cvat-slice-control,
 .cvat-split-track-control,
 .cvat-issue-control,
 .cvat-tools-control,
@@ -140,6 +100,8 @@
 
     > svg {
         transform: scale(0.8);
+        width: 40px;
+        height: 40px;
     }
 }
 
@@ -191,12 +153,21 @@
 .cvat-tools-track-button,
 .cvat-tools-interact-button {
     width: 100%;
-    margin-top: 10px;
+    margin-top: $grid-unit-size;
 }
 
 .cvat-interactors-tips-icon-container {
     text-align: center;
     font-size: 20px;
+}
+
+.cvat-interactors-setups-container {
+    margin-top: $grid-unit-size;
+    margin-bottom: $grid-unit-size;
+
+    > button {
+        margin-right: $grid-unit-size;
+    }
 }
 
 .cvat-interactor-tip-container {
@@ -323,9 +294,23 @@
 }
 
 .cvat-propagate-confirm {
-    > .ant-input-number {
-        width: 70px;
-        margin: 0 5px;
+    > .ant-row {
+        align-items: flex-start;
+        margin-bottom: $grid-unit-size * 2;
+    }
+
+    .ant-input-number {
+        margin-left: $grid-unit-size;
+        margin-right: $grid-unit-size;
+        width: $grid-unit-size * 7;
+    }
+
+    .cvat-propagate-slider-wrapper {
+        height: $grid-unit-size;
+    }
+
+    .cvat-propagate-up-to-wrapper > div:first-child {
+        margin-bottom: $grid-unit-size;
     }
 }
 

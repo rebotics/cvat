@@ -1,4 +1,5 @@
 // Copyright (C) 2021-2022 Intel Corporation
+// Copyright (C) 2023-2024 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
@@ -8,7 +9,9 @@ import Layout from 'antd/lib/layout';
 import Result from 'antd/lib/result';
 import Spin from 'antd/lib/spin';
 import notification from 'antd/lib/notification';
+import Button from 'antd/lib/button';
 
+import './styles.scss';
 import AttributeAnnotationWorkspace from 'components/annotation-page/attribute-annotation-workspace/attribute-annotation-workspace';
 import ReviewAnnotationsWorkspace from 'components/annotation-page/review-workspace/review-workspace';
 import StandardWorkspaceComponent from 'components/annotation-page/standard-workspace/standard-workspace';
@@ -19,8 +22,7 @@ import StatisticsModalComponent from 'components/annotation-page/top-bar/statist
 import AnnotationTopBarContainer from 'containers/annotation-page/top-bar/top-bar';
 import { Workspace } from 'reducers';
 import { usePrevious } from 'utils/hooks';
-import './styles.scss';
-import Button from 'antd/lib/button';
+import { readLatestFrame } from 'utils/remember-latest-frame';
 
 interface Props {
     job: any | null | undefined;
@@ -68,34 +70,36 @@ export default function AnnotationPageComponent(props: Props): JSX.Element {
 
     useEffect(() => {
         if (prevFetching && !fetching && !prevJob && job) {
-            const latestFrame = localStorage.getItem(`Job_${job.id}_frame`);
-            if (latestFrame && Number.isInteger(+latestFrame)) {
-                const parsedFrame = +latestFrame;
-                if (parsedFrame !== frameNumber && parsedFrame >= job.startFrame && parsedFrame <= job.stopFrame) {
-                    const notificationKey = `cvat-notification-continue-job-${job.id}`;
-                    notification.info({
-                        key: notificationKey,
-                        message: `You finished working on frame ${parsedFrame}`,
-                        description: (
-                            <span>
-                                Press
-                                <Button
-                                    className='cvat-notification-continue-job-button'
-                                    type='link'
-                                    onClick={() => {
-                                        changeFrame(parsedFrame);
-                                        notification.close(notificationKey);
-                                    }}
-                                >
-                                    here
-                                </Button>
-                                if you would like to continue
-                            </span>
-                        ),
-                        placement: 'topRight',
-                        className: 'cvat-notification-continue-job',
-                    });
-                }
+            const latestFrame = readLatestFrame(job.id);
+
+            if (typeof latestFrame === 'number' &&
+                latestFrame !== frameNumber &&
+                latestFrame >= job.startFrame &&
+                latestFrame <= job.stopFrame
+            ) {
+                const notificationKey = `cvat-notification-continue-job-${job.id}`;
+                notification.info({
+                    key: notificationKey,
+                    message: `You finished working on frame ${latestFrame}`,
+                    description: (
+                        <span>
+                            Press
+                            <Button
+                                className='cvat-notification-continue-job-button'
+                                type='link'
+                                onClick={() => {
+                                    changeFrame(latestFrame);
+                                    notification.close(notificationKey);
+                                }}
+                            >
+                                here
+                            </Button>
+                            if you would like to continue
+                        </span>
+                    ),
+                    placement: 'topRight',
+                    className: 'cvat-notification-continue-job',
+                });
             }
 
             if (!job.labels.length) {
@@ -106,7 +110,7 @@ export default function AnnotationPageComponent(props: Props): JSX.Element {
                             {`${job.projectId ? 'Project' : 'Task'} ${
                                 job.projectId || job.taskId
                             } does not contain any label. `}
-                            <a href={`/${job.projectId ? 'projects' : 'tasks'}/${job.projectId || job.id}/`}>
+                            <a href={`/${job.projectId ? 'projects' : 'tasks'}/${job.projectId || job.taskId}/`}>
                                 Add
                             </a>
                             {' the first one for editing annotation.'}
@@ -139,31 +143,13 @@ export default function AnnotationPageComponent(props: Props): JSX.Element {
             <Layout.Header className='cvat-annotation-header'>
                 <AnnotationTopBarContainer />
             </Layout.Header>
-            {workspace === Workspace.STANDARD3D && (
-                <Layout.Content className='cvat-annotation-layout-content'>
-                    <StandardWorkspace3DComponent />
-                </Layout.Content>
-            )}
-            {workspace === Workspace.STANDARD && (
-                <Layout.Content className='cvat-annotation-layout-content'>
-                    <StandardWorkspaceComponent />
-                </Layout.Content>
-            )}
-            {workspace === Workspace.ATTRIBUTE_ANNOTATION && (
-                <Layout.Content className='cvat-annotation-layout-content'>
-                    <AttributeAnnotationWorkspace />
-                </Layout.Content>
-            )}
-            {workspace === Workspace.TAG_ANNOTATION && (
-                <Layout.Content className='cvat-annotation-layout-content'>
-                    <TagAnnotationWorkspace />
-                </Layout.Content>
-            )}
-            {workspace === Workspace.REVIEW_WORKSPACE && (
-                <Layout.Content className='cvat-annotation-layout-content'>
-                    <ReviewAnnotationsWorkspace />
-                </Layout.Content>
-            )}
+            <Layout.Content className='cvat-annotation-layout-content'>
+                {workspace === Workspace.STANDARD3D && <StandardWorkspace3DComponent />}
+                {workspace === Workspace.STANDARD && <StandardWorkspaceComponent />}
+                {workspace === Workspace.ATTRIBUTE_ANNOTATION && <AttributeAnnotationWorkspace />}
+                {workspace === Workspace.TAG_ANNOTATION && <TagAnnotationWorkspace />}
+                {workspace === Workspace.REVIEW_WORKSPACE && <ReviewAnnotationsWorkspace />}
+            </Layout.Content>
             <FiltersModalComponent />
             <StatisticsModalComponent />
         </Layout>

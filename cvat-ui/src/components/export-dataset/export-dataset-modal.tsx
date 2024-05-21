@@ -1,5 +1,5 @@
 // Copyright (C) 2021-2022 Intel Corporation
-// Copyright (C) 2022 CVAT.ai Corporation
+// Copyright (C) 2022-2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
@@ -18,9 +18,9 @@ import Space from 'antd/lib/space';
 import TargetStorageField from 'components/storage/target-storage-field';
 import { CombinedState, StorageLocation } from 'reducers';
 import { exportActions, exportDatasetAsync } from 'actions/export-actions';
-import { getCore, Storage, StorageData } from 'cvat-core-wrapper';
-
-const core = getCore();
+import {
+    Dumper, Job, Project, Storage, StorageData, Task,
+} from 'cvat-core-wrapper';
 
 type FormValues = {
     selectedFormat: string | undefined;
@@ -56,15 +56,15 @@ function ExportDatasetModal(props: StateToProps): JSX.Element {
         location: StorageLocation.LOCAL,
     });
     const [defaultStorageLocation, setDefaultStorageLocation] = useState(StorageLocation.LOCAL);
-    const [defaultStorageCloudId, setDefaultStorageCloudId] = useState<number | null>(null);
+    const [defaultStorageCloudId, setDefaultStorageCloudId] = useState<number>();
     const [helpMessage, setHelpMessage] = useState('');
     const dispatch = useDispatch();
 
     useEffect(() => {
-        if (instance instanceof core.classes.Project) {
+        if (instance instanceof Project) {
             setInstanceType(`project #${instance.id}`);
-        } else if (instance instanceof core.classes.Task || instance instanceof core.classes.Job) {
-            if (instance instanceof core.classes.Task) {
+        } else if (instance instanceof Task || instance instanceof Job) {
+            if (instance instanceof Task) {
                 setInstanceType(`task #${instance.id}`);
             } else {
                 setInstanceType(`job #${instance.id}`);
@@ -79,32 +79,12 @@ function ExportDatasetModal(props: StateToProps): JSX.Element {
 
     useEffect(() => {
         if (instance) {
-            if (instance instanceof core.classes.Project || instance instanceof core.classes.Task) {
-                setDefaultStorageLocation(instance.targetStorage?.location || StorageLocation.LOCAL);
-                setDefaultStorageCloudId(instance.targetStorage?.cloudStorageId || null);
-            } else {
-                core.tasks.get({ id: instance.taskId })
-                    .then((response: any) => {
-                        if (response.length) {
-                            const [taskInstance] = response;
-                            setDefaultStorageLocation(taskInstance.targetStorage?.location || StorageLocation.LOCAL);
-                            setDefaultStorageCloudId(taskInstance.targetStorage?.cloudStorageId || null);
-                        }
-                    })
-                    .catch((error: Error) => {
-                        if ((error as any).code !== 403) {
-                            Notification.error({
-                                message: `Could not fetch the task ${instance.taskId}`,
-                                description: error.toString(),
-                            });
-                        }
-                    });
-            }
+            setDefaultStorageLocation(instance.targetStorage.location);
+            setDefaultStorageCloudId(instance.targetStorage.cloudStorageId);
         }
     }, [instance]);
 
     useEffect(() => {
-        // eslint-disable-next-line prefer-template
         setHelpMessage(`Export to ${(defaultStorageLocation) ? defaultStorageLocation.split('_')[0] : 'local'} ` +
                         `storage ${(defaultStorageCloudId) ? `№${defaultStorageCloudId}` : ''}`);
     }, [defaultStorageLocation, defaultStorageCloudId]);
@@ -129,7 +109,7 @@ function ExportDatasetModal(props: StateToProps): JSX.Element {
                         location: defaultStorageLocation,
                         cloudStorageId: defaultStorageCloudId,
                     }) : new Storage(targetStorage),
-                    values.customName ? `${values.customName}.zip` : null,
+                    values.customName ? `${values.customName}.zip` : undefined,
                 ),
             );
             closeModal();
@@ -168,10 +148,13 @@ function ExportDatasetModal(props: StateToProps): JSX.Element {
                 >
                     <Select virtual={false} placeholder='Select dataset format' className='cvat-modal-export-select'>
                         {dumpers
-                            .sort((a: any, b: any) => a.name.localeCompare(b.name))
-                            .filter((dumper: any): boolean => dumper.dimension === instance?.dimension)
+                            .sort((a: Dumper, b: Dumper) => a.name.localeCompare(b.name))
+                            .filter(
+                                (dumper: Dumper): boolean => dumper.dimension === instance?.dimension ||
+                                    (instance instanceof Project && instance.dimension === null),
+                            )
                             .map(
-                                (dumper: any): JSX.Element => {
+                                (dumper: Dumper): JSX.Element => {
                                     const pending = (instance && current ? current : [])
                                         .includes(dumper.name);
                                     const disabled = !dumper.enabled || pending;
@@ -192,7 +175,11 @@ function ExportDatasetModal(props: StateToProps): JSX.Element {
                     </Select>
                 </Form.Item>
                 <Space>
-                    <Form.Item name='saveImages' className='cvat-modal-export-switch-use-default-storage'>
+                    <Form.Item
+                        className='cvat-modal-export-switch-use-default-storage'
+                        name='saveImages'
+                        valuePropName='checked'
+                    >
                         <Switch className='cvat-modal-export-save-images' />
                     </Form.Item>
                     <Text strong>Save images</Text>
@@ -206,7 +193,7 @@ function ExportDatasetModal(props: StateToProps): JSX.Element {
                     />
                 </Form.Item>
                 <TargetStorageField
-                    instanceId={instance?.id}
+                    instanceId={instance ? instance.id : null}
                     switchDescription='Use default settings'
                     switchHelpMessage={helpMessage}
                     useDefaultStorage={useDefaultTargetStorage}
@@ -224,9 +211,9 @@ function ExportDatasetModal(props: StateToProps): JSX.Element {
 }
 
 interface StateToProps {
-    dumpers: any;
-    instance: any;
-    current: any;
+    dumpers: Dumper[];
+    instance: Project | Task | Job | null;
+    current: string[];
 }
 
 function mapStateToProps(state: CombinedState): StateToProps {

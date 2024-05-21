@@ -1,4 +1,5 @@
 // Copyright (C) 2020-2022 Intel Corporation
+// Copyright (C) 2022-2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
@@ -21,12 +22,10 @@ import {
     changeFrameAsync,
     rememberObject,
 } from 'actions/annotation-actions';
-import { Canvas } from 'cvat-canvas-wrapper';
-import { Canvas3d } from 'cvat-canvas3d-wrapper';
+import { getCore, Label, LabelType } from 'cvat-core-wrapper';
 import { CombinedState, ObjectType } from 'reducers';
-import { adjustContextImagePosition } from 'components/annotation-page/standard-workspace/context-image/context-image';
+import { filterApplicableForType } from 'utils/filter-applicable-labels';
 import LabelSelector from 'components/label-selector/label-selector';
-import { getCore } from 'cvat-core-wrapper';
 import isAbleToChangeFrame from 'utils/is-able-to-change-frame';
 import GlobalHotKeys, { KeyMap } from 'utils/mousetrap-react';
 import ShortcutsSelect from './shortcuts-select';
@@ -37,16 +36,16 @@ interface StateToProps {
     states: any[];
     labels: any[];
     jobInstance: any;
-    canvasInstance: Canvas | Canvas3d;
     frameNumber: number;
     keyMap: KeyMap;
     normalizedKeyMap: Record<string, string>;
     frameData: any;
+    showDeletedFrames: boolean;
 }
 
 interface DispatchToProps {
     removeObject(objectState: any): void;
-    createAnnotations(jobInstance: any, frame: number, objectStates: any[]): void;
+    createAnnotations(objectStates: any[]): void;
     changeFrame(frame: number, fillBuffer?: boolean, frameStep?: number): void;
     onRememberObject(labelID: number): void;
 }
@@ -59,20 +58,22 @@ function mapStateToProps(state: CombinedState): StateToProps {
             },
             annotations: { states },
             job: { instance: jobInstance, labels },
-            canvas: { instance: canvasInstance },
         },
         shortcuts: { keyMap, normalizedKeyMap },
+        settings: {
+            player: { showDeletedFrames },
+        },
     } = state;
 
     return {
         jobInstance,
         labels,
         states,
-        canvasInstance: canvasInstance as Canvas | Canvas3d,
         frameNumber,
         keyMap,
         normalizedKeyMap,
         frameData,
+        showDeletedFrames,
     };
 }
 
@@ -81,8 +82,8 @@ function mapDispatchToProps(dispatch: ThunkDispatch<CombinedState, {}, Action>):
         changeFrame(frame: number, fillBuffer?: boolean, frameStep?: number): void {
             dispatch(changeFrameAsync(frame, fillBuffer, frameStep));
         },
-        createAnnotations(jobInstance: any, frame: number, objectStates: any[]): void {
-            dispatch(createAnnotationsAsync(jobInstance, frame, objectStates));
+        createAnnotations(objectStates: any[]): void {
+            dispatch(createAnnotationsAsync(objectStates));
         },
         removeObject(objectState: any): void {
             dispatch(removeObjectAction(objectState, false));
@@ -100,12 +101,12 @@ function TagAnnotationSidebar(props: StateToProps & DispatchToProps): JSX.Elemen
         removeObject,
         jobInstance,
         changeFrame,
-        canvasInstance,
         frameNumber,
         onRememberObject,
         createAnnotations,
         keyMap,
         frameData,
+        showDeletedFrames,
     } = props;
 
     const preventDefault = (event: KeyboardEvent | undefined): void => {
@@ -114,12 +115,15 @@ function TagAnnotationSidebar(props: StateToProps & DispatchToProps): JSX.Elemen
         }
     };
 
-    const controlsDisabled = !labels.length || frameData.deleted;
-    const defaultLabelID = labels.length ? labels[0].id : null;
+    const [applicableLabels, setApplicableLabels] = useState<Label[]>(
+        filterApplicableForType(LabelType.TAG, labels),
+    );
+    const controlsDisabled = !applicableLabels.length || frameData.deleted;
+    const defaultLabelID = applicableLabels.length ? applicableLabels[0].id as number : null;
 
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
     const [frameTags, setFrameTags] = useState([] as any[]);
-    const [selectedLabelID, setSelectedLabelID] = useState<number>(defaultLabelID);
+    const [selectedLabelID, setSelectedLabelID] = useState<number | null>(defaultLabelID);
     const [skipFrame, setSkipFrame] = useState(false);
 
     useEffect(() => {
@@ -129,13 +133,16 @@ function TagAnnotationSidebar(props: StateToProps & DispatchToProps): JSX.Elemen
     }, []);
 
     useEffect(() => {
+        setApplicableLabels(filterApplicableForType(LabelType.TAG, labels));
+    }, [labels]);
+
+    useEffect(() => {
         const listener = (event: Event): void => {
             if (
                 (event as TransitionEvent).propertyName === 'width' &&
                 ((event.target as any).classList as DOMTokenList).contains('cvat-tag-annotation-sidebar')
             ) {
-                canvasInstance.fitCanvas();
-                canvasInstance.fit();
+                window.dispatchEvent(new Event('resize'));
             }
         };
 
@@ -173,10 +180,13 @@ function TagAnnotationSidebar(props: StateToProps & DispatchToProps): JSX.Elemen
         if (objectState) removeObject(objectState);
     };
 
-    const onChangeFrame = (): void => {
-        const frame = Math.min(jobInstance.stopFrame, frameNumber + 1);
-
-        if (isAbleToChangeFrame()) {
+    const onChangeFrame = async (): Promise<void> => {
+        const frame = await jobInstance.frames.search(
+            { notDeleted: !showDeletedFrames },
+            frameNumber + 1,
+            jobInstance.stopFrame,
+        );
+        if (frame !== null && isAbleToChangeFrame()) {
             changeFrame(frame);
         }
     };
@@ -190,7 +200,7 @@ function TagAnnotationSidebar(props: StateToProps & DispatchToProps): JSX.Elemen
                 label: labels.filter((label: any) => label.id === labelID)[0],
                 frame: frameNumber,
             });
-            createAnnotations(jobInstance, frameNumber, [objectState]);
+            createAnnotations([objectState]);
 
             if (skipFrame) onChangeFrame();
         }
@@ -211,7 +221,9 @@ function TagAnnotationSidebar(props: StateToProps & DispatchToProps): JSX.Elemen
     const handlers = {
         SWITCH_DRAW_MODE: (event: KeyboardEvent | undefined) => {
             preventDefault(event);
-            onShortcutPress(event, selectedLabelID);
+            if (selectedLabelID !== null) {
+                onShortcutPress(event, selectedLabelID);
+            }
         },
     };
 
@@ -223,7 +235,6 @@ function TagAnnotationSidebar(props: StateToProps & DispatchToProps): JSX.Elemen
                     ant-layout-sider-zero-width-trigger
                     ant-layout-sider-zero-width-trigger-left`}
                 onClick={() => {
-                    adjustContextImagePosition(!sidebarCollapsed);
                     setSidebarCollapsed(!sidebarCollapsed);
                 }}
             >
@@ -245,7 +256,6 @@ function TagAnnotationSidebar(props: StateToProps & DispatchToProps): JSX.Elemen
                         ant-layout-sider-zero-width-trigger
                         ant-layout-sider-zero-width-trigger-left`}
                     onClick={() => {
-                        adjustContextImagePosition(!sidebarCollapsed);
                         setSidebarCollapsed(!sidebarCollapsed);
                     }}
                 >
@@ -259,7 +269,7 @@ function TagAnnotationSidebar(props: StateToProps & DispatchToProps): JSX.Elemen
                 <Row justify='start' className='cvat-tag-annotation-sidebar-label-select'>
                     <Col>
                         <LabelSelector
-                            labels={labels}
+                            labels={applicableLabels}
                             value={selectedLabelID}
                             onChange={onChangeLabel}
                             onEnterPress={onAddTag}
@@ -267,7 +277,7 @@ function TagAnnotationSidebar(props: StateToProps & DispatchToProps): JSX.Elemen
                         <Button
                             type='primary'
                             className='cvat-add-tag-button'
-                            onClick={() => onAddTag(selectedLabelID)}
+                            onClick={() => onAddTag(selectedLabelID as number)}
                             icon={<PlusOutlined />}
                         />
                     </Col>
@@ -286,7 +296,7 @@ function TagAnnotationSidebar(props: StateToProps & DispatchToProps): JSX.Elemen
                 </Row>
                 <Row>
                     <Col>
-                        <ShortcutsSelect onShortcutPress={onShortcutPress} />
+                        <ShortcutsSelect labels={applicableLabels} onShortcutPress={onShortcutPress} />
                     </Col>
                 </Row>
                 <Row justify='center' className='cvat-tag-annotation-sidebar-shortcut-help'>

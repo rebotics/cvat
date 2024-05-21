@@ -2,12 +2,12 @@
 //
 // SPDX-License-Identifier: MIT
 
-const globalConfig = require('../.eslintrc.js');
+const globalConfig = require('../.eslintrc.cjs');
 
 module.exports = {
     root: true,
     parserOptions: {
-        parser: 'babel-eslint',
+        parser: '@babel/eslint-parser',
         sourceType: 'module',
     },
     ignorePatterns: [
@@ -23,5 +23,6 @@ module.exports = {
         ...Object.fromEntries(Object.entries(globalConfig.rules).filter(([key]) => {
             return !key.startsWith('@typescript-eslint')
         })),
+        "cypress/no-unnecessary-waiting": "off",
     },
 };

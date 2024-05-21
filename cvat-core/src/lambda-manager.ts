@@ -1,40 +1,49 @@
 // Copyright (C) 2019-2022 Intel Corporation
+// Copyright (C) 2022-2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
-const serverProxy = require('./server-proxy').default;
-const { ArgumentError } = require('./exceptions');
-const MLModel = require('./ml-model');
-const { RQStatus } = require('./enums');
+import serverProxy from './server-proxy';
+import { ArgumentError } from './exceptions';
+import MLModel from './ml-model';
+import { RQStatus } from './enums';
+
+export interface ModelProvider {
+    name: string;
+    icon: string;
+    attributes: Record<string, string>;
+}
 
 class LambdaManager {
+    private cachedList: MLModel[];
+    private listening: Record<number, {
+        onUpdate: ((status: RQStatus, progress: number, message?: string) => void)[];
+        functionID: string;
+        timeout: number | null;
+    }>;
+
     constructor() {
         this.listening = {};
-        this.cachedList = null;
+        this.cachedList = [];
     }
 
-    async list() {
-        if (Array.isArray(this.cachedList)) {
-            return [...this.cachedList];
-        }
+    async list(): Promise<{ models: MLModel[], count: number }> {
+        const lambdaFunctions = await serverProxy.lambda.list();
 
-        const result = await serverProxy.lambda.list();
         const models = [];
-
-        for (const model of result) {
+        for (const model of lambdaFunctions) {
             models.push(
                 new MLModel({
                     ...model,
-                    type: model.kind,
                 }),
             );
         }
 
         this.cachedList = models;
-        return models;
+        return { models, count: lambdaFunctions.length };
     }
 
-    async run(taskID, model, args) {
+    async run(taskID: number, model: MLModel, args: any) {
         if (!Number.isInteger(taskID) || taskID < 0) {
             throw new ArgumentError(`Argument taskID must be a positive integer. Got "${taskID}"`);
         }
@@ -68,60 +77,93 @@ class LambdaManager {
             ...args,
             task: taskID,
         };
-
         const result = await serverProxy.lambda.call(model.id, body);
         return result;
     }
 
     async requests() {
-        const result = await serverProxy.lambda.requests();
-        return result.filter((request) => ['queued', 'started'].includes(request.status));
+        const lambdaRequests = await serverProxy.lambda.requests();
+        return lambdaRequests
+            .filter((request) => [RQStatus.QUEUED, RQStatus.STARTED].includes(request.status));
     }
 
-    async cancel(requestID) {
+    async cancel(requestID, functionID): Promise<void> {
         if (typeof requestID !== 'string') {
             throw new ArgumentError(`Request id argument is required to be a string. But got ${requestID}`);
+        }
+        const model = this.cachedList.find((_model) => _model.id === functionID);
+        if (!model) {
+            throw new ArgumentError('Incorrect Function Id provided');
         }
 
         if (this.listening[requestID]) {
             clearTimeout(this.listening[requestID].timeout);
             delete this.listening[requestID];
         }
+
         await serverProxy.lambda.cancel(requestID);
     }
 
-    async listen(requestID, onUpdate) {
-        const timeoutCallback = async () => {
-            try {
-                this.listening[requestID].timeout = null;
-                const response = await serverProxy.lambda.status(requestID);
+    async listen(
+        requestID: string,
+        functionID: string,
+        callback: (status: RQStatus, progress: number, message?: string) => void,
+    ): Promise<void> {
+        const model = this.cachedList.find((_model) => _model.id === functionID);
+        if (!model) {
+            throw new ArgumentError('Incorrect function Id provided');
+        }
 
-                if (response.status === RQStatus.QUEUED || response.status === RQStatus.STARTED) {
-                    onUpdate(response.status, response.progress || 0);
-                    this.listening[requestID].timeout = setTimeout(timeoutCallback, 2000);
-                } else {
-                    if (response.status === RQStatus.FINISHED) {
-                        onUpdate(response.status, response.progress || 100);
+        if (requestID in this.listening) {
+            this.listening[requestID].onUpdate.push(callback);
+            // already listening, avoid sending extra requests
+            return;
+        }
+        const timeoutCallback = (): void => {
+            serverProxy.lambda.status(requestID).then((response) => {
+                const { status } = response;
+                if (requestID in this.listening) {
+                    // check it was not cancelled
+                    const { onUpdate } = this.listening[requestID];
+                    if ([RQStatus.QUEUED, RQStatus.STARTED].includes(status)) {
+                        onUpdate.forEach((update) => update(status, response.progress || 0));
+                        this.listening[requestID].timeout = window
+                            .setTimeout(timeoutCallback, status === RQStatus.QUEUED ? 30000 : 10000);
                     } else {
-                        onUpdate(response.status, response.progress || 0, response.exc_info || '');
+                        delete this.listening[requestID];
+                        if (status === RQStatus.FINISHED) {
+                            onUpdate
+                                .forEach((update) => update(status, response.progress || 100));
+                        } else {
+                            onUpdate
+                                .forEach((update) => update(status, response.progress || 0, response.exc_info || ''));
+                        }
                     }
-
-                    delete this.listening[requestID];
                 }
-            } catch (error) {
-                onUpdate(
-                    RQStatus.UNKNOWN,
-                    0,
-                    `Could not get a status of the request ${requestID}. ${error.toString()}`,
-                );
-            }
+            }).catch((error) => {
+                if (requestID in this.listening) {
+                    // check it was not cancelled
+                    const { onUpdate } = this.listening[requestID];
+                    onUpdate
+                        .forEach((update) => update(
+                            RQStatus.UNKNOWN,
+                            0,
+                            `Could not get a status of the request ${requestID}. ${error.toString()}`,
+                        ));
+                }
+            }).finally(() => {
+                if (requestID in this.listening) {
+                    this.listening[requestID].timeout = null;
+                }
+            });
         };
 
         this.listening[requestID] = {
-            onUpdate,
-            timeout: setTimeout(timeoutCallback, 2000),
+            onUpdate: [callback],
+            functionID,
+            timeout: window.setTimeout(timeoutCallback),
         };
     }
 }
 
-module.exports = new LambdaManager();
+export default new LambdaManager();

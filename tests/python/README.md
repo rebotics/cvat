@@ -18,29 +18,46 @@ Also it is worth to have a real instance with real data inside and tests
 the server calling REST API directly (as it done by users).
 
 ## How to run?
+**Initial steps**
 
-1. After that please look at documentation for [pytest](https://docs.pytest.org/en/6.2.x/).
-   Generally, you have to install requirements and run the following command from
-   the root directory of the cloned CVAT repository:
-
-   ```console
-   pip install -e cvat-sdk/
-   pip install -e cvat-cli/
-   pip install -r tests/python/requirements.txt
-   pytest tests/python/
+1. Follow [this guide](../../site/content/en/docs/api_sdk/sdk/developer-guide.md) to prepare
+   `cvat-sdk` and `cvat-cli` source code
+1. Install all necessary requirements before running REST API tests:
    ```
+   pip install -r ./tests/python/requirements.txt
+   pip install -e ./cvat-sdk
+   pip install -e ./cvat-cli
+   ```
+1. Stop any other CVAT containers which you run previously. They keep ports
+which are used by containers for the testing system.
 
-   See the [contributing guide](../../site/content/en/docs/contributing/running-tests.md)
-   to get more information about tests running.
+**Running tests**
 
+- Run all REST API tests:
+
+  ```shell
+  pytest ./tests/python
+  ```
+
+  This command will automatically start all necessary docker containers.
+  See the [contributing guide](../../site/content/en/docs/contributing/running-tests.md)
+  to get more information about tests running.
+
+- Run tests to check the functionality of limiting active jobs in a queue per user:
+
+  ```shell
+  ONE_RUNNING_JOB_IN_QUEUE_PER_USER="true" pytest tests/python/rest_api/test_queues.py
+  ```
 ## How to upgrade testing assets?
 
 When you have a new use case which cannot be expressed using objects already
 available in the system like comments, users, issues, please use the following
 procedure to add them:
 
-1. Run a clean CVAT instance
-1. Restore DB and data volume using commands below or running tests
+1. Run a clean CVAT instance and restore DB and data volume
+   ```console
+   pytest tests/python/ --start-services
+   ```
 1. Add new objects (e.g. issues, comments, tasks, projects)
 1. Backup DB and data volume using commands below
 1. Don't forget to dump new objects into corresponding json files inside
@@ -68,8 +85,8 @@ for i, color in enumerate(colormap):
 To backup DB and data volume, please use commands below.
 
 ```console
-docker exec test_cvat_server_1 python manage.py dumpdata --indent 2 --natural-foreign --exclude=auth.permission --exclude=contenttypes > assets/cvat_db/data.json
-docker exec test_cvat_server_1 tar -cjv /home/django/data > assets/cvat_db/cvat_data.tar.bz2
+docker exec test_cvat_server_1 python manage.py dumpdata --indent 2 --natural-foreign --exclude=auth.permission --exclude=contenttypes --exclude=django_rq > shared/assets/cvat_db/data.json
+docker exec test_cvat_server_1 tar -cjv /home/django/data > shared/assets/cvat_db/cvat_data.tar.bz2
 ```
 
 > Note: if you won't be use --indent options or will be use with other value
@@ -81,6 +98,8 @@ If you have updated the test database and want to update the assets/*.json
 files as well, run the appropriate script:
 
 ```
+cd tests/python
+pytest ./ --start-services
 python shared/utils/dump_objects.py
 ```
 
@@ -166,7 +185,7 @@ Assets directory has two parts:
    ```
    Just dump JSON assets with:
    ```
-   python3 tests/python/shared/utils/dump_objests.py
+   python3 tests/python/shared/utils/dump_objects.py
    ```
 
 1. If your test infrastructure has been corrupted and you have errors during db restoring.

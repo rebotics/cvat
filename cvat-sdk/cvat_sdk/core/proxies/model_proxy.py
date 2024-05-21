@@ -13,6 +13,7 @@ from typing import (
     Dict,
     Generic,
     List,
+    Literal,
     Optional,
     Tuple,
     Type,
@@ -21,7 +22,7 @@ from typing import (
     overload,
 )
 
-from typing_extensions import Literal, Self
+from typing_extensions import Self
 
 from cvat_sdk.api_client.model_utils import IModelData, ModelNormal, to_json
 from cvat_sdk.core.helpers import get_paginated_collection
@@ -55,7 +56,8 @@ class ModelProxy(ABC, Generic[ModelType, ApiType]):
 
 class Entity(ModelProxy[ModelType, ApiType]):
     """
-    Represents a single object. Implements related operations and provides access to data members.
+    Represents a single object. Implements related operations and provides read access
+    to data members.
     """
 
     _model: ModelType
@@ -121,7 +123,7 @@ _EntityT = TypeVar("_EntityT", bound=Entity)
 class ModelCreateMixin(Generic[_EntityT, IModel]):
     def create(self: Repo, spec: Union[Dict[str, Any], IModel]) -> _EntityT:
         """
-        Creates a new object on the server and returns corresponding local object
+        Creates a new object on the server and returns the corresponding local object
         """
 
         (model, _) = self.api.create(spec)
@@ -131,7 +133,7 @@ class ModelCreateMixin(Generic[_EntityT, IModel]):
 class ModelRetrieveMixin(Generic[_EntityT]):
     def retrieve(self: Repo, obj_id: int) -> _EntityT:
         """
-        Retrieves an object from server by ID
+        Retrieves an object from the server by ID
         """
 
         (model, _) = self.api.retrieve(id=obj_id)
@@ -181,7 +183,7 @@ class ModelUpdateMixin(ABC, Generic[IModel]):
 
     def fetch(self: Entity) -> Self:
         """
-        Updates current object from the server
+        Updates the current object from the server
         """
 
         # TODO: implement revision checking
@@ -190,7 +192,9 @@ class ModelUpdateMixin(ABC, Generic[IModel]):
 
     def update(self: Entity, values: Union[Dict[str, Any], IModel]) -> Self:
         """
-        Commits local model changes to the server
+        Commits model changes to the server
+
+        The local object is updated from the server after this operation.
         """
 
         # TODO: implement revision checking

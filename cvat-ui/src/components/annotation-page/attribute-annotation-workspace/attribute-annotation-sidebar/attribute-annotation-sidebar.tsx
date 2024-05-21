@@ -1,16 +1,16 @@
 // Copyright (C) 2020-2022 Intel Corporation
+// Copyright (C) 2022-2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
 import React, { useState, useEffect } from 'react';
 import { connect } from 'react-redux';
 import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
-import { SelectValue } from 'antd/lib/select';
 import Layout, { SiderProps } from 'antd/lib/layout';
 import Text from 'antd/lib/typography/Text';
 
-import { Canvas } from 'cvat-canvas-wrapper';
-import { Canvas3d } from 'cvat-canvas3d-wrapper';
+import { filterApplicableLabels } from 'utils/filter-applicable-labels';
+import { Label } from 'cvat-core-wrapper';
 import { LogType } from 'cvat-logger';
 import {
     activateObject as activateObjectAction,
@@ -22,7 +22,6 @@ import GlobalHotKeys, { KeyMap } from 'utils/mousetrap-react';
 import { ThunkDispatch } from 'utils/redux';
 import AppearanceBlock from 'components/annotation-page/appearance-block';
 import ObjectButtonsContainer from 'containers/annotation-page/standard-workspace/objects-side-bar/object-buttons';
-import { adjustContextImagePosition } from 'components/annotation-page/standard-workspace/context-image/context-image';
 import { CombinedState, ObjectType } from 'reducers';
 import AttributeEditor from './attribute-editor';
 import AttributeSwitcher from './attribute-switcher';
@@ -37,7 +36,6 @@ interface StateToProps {
     jobInstance: any;
     keyMap: KeyMap;
     normalizedKeyMap: Record<string, string>;
-    canvasInstance: Canvas | Canvas3d;
     canvasIsReady: boolean;
     curZLayer: number;
 }
@@ -62,7 +60,7 @@ function mapStateToProps(state: CombinedState): StateToProps {
                 zLayer: { cur },
             },
             job: { instance: jobInstance, labels },
-            canvas: { instance: canvasInstance, ready: canvasIsReady },
+            canvas: { ready: canvasIsReady },
         },
         shortcuts: { keyMap, normalizedKeyMap },
     } = state;
@@ -75,7 +73,6 @@ function mapStateToProps(state: CombinedState): StateToProps {
         states,
         keyMap,
         normalizedKeyMap,
-        canvasInstance,
         canvasIsReady,
         curZLayer: cur,
     };
@@ -107,7 +104,6 @@ function AttributeAnnotationSidebar(props: StateToProps & DispatchToProps): JSX.
         activateObject,
         keyMap,
         normalizedKeyMap,
-        canvasInstance,
         canvasIsReady,
         curZLayer,
     } = props;
@@ -127,8 +123,7 @@ function AttributeAnnotationSidebar(props: StateToProps & DispatchToProps): JSX.
 
         const listener = (event: TransitionEvent): void => {
             if (event.target && event.propertyName === 'width' && event.target === collapser) {
-                canvasInstance.fitCanvas();
-                canvasInstance.fit();
+                window.dispatchEvent(new Event('resize'));
                 (collapser as HTMLElement).removeEventListener('transitionend', listener as any);
             }
         };
@@ -137,7 +132,6 @@ function AttributeAnnotationSidebar(props: StateToProps & DispatchToProps): JSX.
             (collapser as HTMLElement).addEventListener('transitionend', listener as any);
         }
 
-        adjustContextImagePosition(!sidebarCollapsed);
         setSidebarCollapsed(!sidebarCollapsed);
     };
 
@@ -147,6 +141,7 @@ function AttributeAnnotationSidebar(props: StateToProps & DispatchToProps): JSX.
         activatedStateID === null || activatedIndex === -1 ? null : filteredStates[activatedIndex];
 
     const activeAttribute = activeObjectState ? labelAttrMap[activeObjectState.label.id] : null;
+    const applicableLabels = activeObjectState ? filterApplicableLabels(activeObjectState, labels) : [];
 
     if (canvasIsReady) {
         if (activeObjectState) {
@@ -308,12 +303,15 @@ function AttributeAnnotationSidebar(props: StateToProps & DispatchToProps): JSX.
                     nextObject={nextObject}
                 />
                 <ObjectBasicsEditor
-                    currentLabel={activeObjectState.label.name}
-                    labels={labels}
-                    changeLabel={(value: SelectValue): void => {
-                        const labelName = value as string;
-                        const [newLabel] = labels.filter((_label): boolean => _label.name === labelName);
-                        activeObjectState.label = newLabel;
+                    currentLabel={activeObjectState.label.id}
+                    labels={applicableLabels}
+                    changeLabel={(value: Label): void => {
+                        jobInstance.logger.log(LogType.changeLabel, {
+                            object_id: activeObjectState.clientID,
+                            from: activeObjectState.label.id,
+                            to: value.id,
+                        });
+                        activeObjectState.label = value;
                         updateAnnotations([activeObjectState]);
                     }}
                 />

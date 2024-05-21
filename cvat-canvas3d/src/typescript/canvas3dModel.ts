@@ -1,7 +1,9 @@
 // Copyright (C) 2021-2022 Intel Corporation
+// Copyright (C) 2022-2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
+import { ObjectState } from '.';
 import { MasterImpl } from './master';
 
 export interface Size {
@@ -16,13 +18,20 @@ export interface ActiveElement {
 
 export interface GroupData {
     enabled: boolean;
-    grouped?: [];
+}
+
+export interface MergeData {
+    enabled: boolean;
+}
+
+export interface SplitData {
+    enabled: boolean;
 }
 
 export interface Image {
     renderWidth: number;
     renderHeight: number;
-    imageData: ImageData | CanvasImageSource;
+    imageData: Blob;
 }
 
 export interface DrawData {
@@ -57,10 +66,6 @@ export enum MouseInteraction {
     HOVER = 'hover',
 }
 
-export interface FocusData {
-    clientID: string | null;
-}
-
 export interface ShapeProperties {
     opacity: number;
     outlined: boolean;
@@ -75,43 +80,45 @@ export enum UpdateReasons {
     DRAW = 'draw',
     SELECT = 'select',
     CANCEL = 'cancel',
-    DATA_FAILED = 'data_failed',
     DRAG_CANVAS = 'drag_canvas',
     SHAPE_ACTIVATED = 'shape_activated',
     GROUP = 'group',
+    MERGE = 'merge',
+    SPLIT = 'split',
     FITTED_CANVAS = 'fitted_canvas',
+    SHAPES_CONFIG_UPDATED = 'shapes_config_updated',
 }
 
 export enum Mode {
     IDLE = 'idle',
-    DRAG = 'drag',
-    RESIZE = 'resize',
     DRAW = 'draw',
     EDIT = 'edit',
-    INTERACT = 'interact',
     DRAG_CANVAS = 'drag_canvas',
     GROUP = 'group',
-    BUSY = 'busy',
+    MERGE = 'merge',
+    SPLIT = 'split',
 }
 
 export interface Canvas3dDataModel {
     activeElement: ActiveElement;
     canvasSize: Size;
-    image: Image | null;
+    image: { imageData: Blob } | null;
     imageID: number | null;
     imageOffset: number;
     imageSize: Size;
     imageIsDeleted: boolean;
     drawData: DrawData;
     mode: Mode;
-    objectUpdating: boolean;
-    exception: Error | null;
-    objects: any[];
-    groupedObjects: any[];
-    focusData: FocusData;
-    selected: any;
+    objects: ObjectState[];
     shapeProperties: ShapeProperties;
     groupData: GroupData;
+    mergeData: MergeData;
+    splitData: SplitData;
+    isFrameUpdating: boolean;
+    nextSetupRequest: {
+        frameData: any;
+        objectStates: ObjectState[];
+    } | null;
 }
 
 export interface Canvas3dModel {
@@ -119,16 +126,22 @@ export interface Canvas3dModel {
     data: Canvas3dDataModel;
     readonly imageIsDeleted: boolean;
     readonly groupData: GroupData;
-    setup(frameData: any, objectStates: any[]): void;
+    readonly mergeData: MergeData;
+    readonly objects: ObjectState[];
+    setup(frameData: any, objectStates: ObjectState[]): void;
     isAbleToChangeFrame(): boolean;
     draw(drawData: DrawData): void;
     cancel(): void;
     dragCanvas(enable: boolean): void;
     activate(clientID: string | null, attributeID: number | null): void;
-    configureShapes(shapeProperties: any): void;
+    configureShapes(shapeProperties: ShapeProperties): void;
     fit(): void;
     group(groupData: GroupData): void;
+    split(splitData: SplitData): void;
+    merge(mergeData: MergeData): void;
     destroy(): void;
+    updateCanvasObjects(): void;
+    unlockFrameUpdating(): void;
 }
 
 export class Canvas3dModelImpl extends MasterImpl implements Canvas3dModel {
@@ -145,9 +158,7 @@ export class Canvas3dModelImpl extends MasterImpl implements Canvas3dModel {
                 height: 0,
                 width: 0,
             },
-            objectUpdating: false,
             objects: [],
-            groupedObjects: [],
             image: null,
             imageID: null,
             imageOffset: 0,
@@ -161,15 +172,15 @@ export class Canvas3dModelImpl extends MasterImpl implements Canvas3dModel {
                 initialState: null,
             },
             mode: Mode.IDLE,
-            exception: null,
-            focusData: {
-                clientID: null,
-            },
             groupData: {
                 enabled: false,
-                grouped: [],
             },
-            selected: null,
+            mergeData: {
+                enabled: false,
+            },
+            splitData: {
+                enabled: false,
+            },
             shapeProperties: {
                 opacity: 40,
                 outlined: false,
@@ -177,55 +188,70 @@ export class Canvas3dModelImpl extends MasterImpl implements Canvas3dModel {
                 selectedOpacity: 60,
                 colorBy: 'Label',
             },
+            isFrameUpdating: false,
+            nextSetupRequest: null,
         };
     }
 
-    public setup(frameData: any, objectStates: any[]): void {
+    public updateCanvasObjects(): void {
+        this.notify(UpdateReasons.OBJECTS_UPDATED);
+    }
+
+    public unlockFrameUpdating(): void {
+        this.data.isFrameUpdating = false;
+        if (this.data.nextSetupRequest) {
+            try {
+                const { frameData, objectStates } = this.data.nextSetupRequest;
+                this.setup(frameData, objectStates);
+            } finally {
+                this.data.nextSetupRequest = null;
+            }
+        }
+    }
+
+    public setup(frameData: any, objectStates: ObjectState[]): void {
         if (this.data.imageID !== frameData.number) {
-            if ([Mode.EDIT, Mode.DRAG, Mode.RESIZE].includes(this.data.mode)) {
+            if ([Mode.EDIT].includes(this.data.mode)) {
                 throw Error(`Canvas is busy. Action: ${this.data.mode}`);
             }
         }
-        if ([Mode.EDIT, Mode.BUSY].includes(this.data.mode)) {
+
+        if (this.data.isFrameUpdating) {
+            this.data.nextSetupRequest = {
+                frameData, objectStates,
+            };
             return;
         }
 
         if (frameData.number === this.data.imageID && frameData.deleted === this.data.imageIsDeleted) {
-            if (this.data.objectUpdating) {
-                return;
-            }
             this.data.objects = objectStates;
-            this.data.objectUpdating = true;
             this.notify(UpdateReasons.OBJECTS_UPDATED);
             return;
         }
 
+        this.data.isFrameUpdating = true;
         this.data.imageID = frameData.number;
         frameData
             .data((): void => {
                 this.data.image = null;
                 this.notify(UpdateReasons.IMAGE_CHANGED);
             })
-            .then((data: Image): void => {
-                if (frameData.number !== this.data.imageID) {
-                    // already another image
-                    return;
-                }
-
+            .then((data: { imageData: Blob }): void => {
                 this.data.imageSize = {
                     height: frameData.height as number,
                     width: frameData.width as number,
                 };
                 this.data.imageIsDeleted = frameData.deleted;
                 this.data.image = data;
-                this.notify(UpdateReasons.IMAGE_CHANGED);
                 this.data.objects = objectStates;
-                this.notify(UpdateReasons.OBJECTS_UPDATED);
+                this.notify(UpdateReasons.IMAGE_CHANGED);
             })
             .catch((exception: any): void => {
-                this.data.exception = exception;
-                this.notify(UpdateReasons.DATA_FAILED);
-                throw exception;
+                this.data.isFrameUpdating = false;
+                // don't notify when the frame is no longer needed
+                if (typeof exception !== 'number' || exception === this.data.imageID) {
+                    throw exception;
+                }
             });
     }
 
@@ -237,9 +263,13 @@ export class Canvas3dModelImpl extends MasterImpl implements Canvas3dModel {
         return this.data.mode;
     }
 
+    public get objects(): ObjectState[] {
+        return [...this.data.objects];
+    }
+
     public isAbleToChangeFrame(): boolean {
-        const isUnable = [Mode.DRAG, Mode.EDIT, Mode.RESIZE, Mode.INTERACT, Mode.BUSY].includes(this.data.mode) ||
-            (this.data.mode === Mode.DRAW && typeof this.data.drawData.redraw === 'number');
+        const isUnable = [Mode.EDIT].includes(this.data.mode) ||
+            this.data.isFrameUpdating || (this.data.mode === Mode.DRAW && typeof this.data.drawData.redraw === 'number');
         return !isUnable;
     }
 
@@ -290,11 +320,11 @@ export class Canvas3dModelImpl extends MasterImpl implements Canvas3dModel {
         this.notify(UpdateReasons.DRAG_CANVAS);
     }
 
-    public activate(clientID: string, attributeID: number | null): void {
+    public activate(clientID: string | null, attributeID: number | null): void {
         if (this.data.activeElement.clientID === clientID && this.data.activeElement.attributeID === attributeID) {
             return;
         }
-        if (this.data.mode !== Mode.IDLE) {
+        if (this.data.mode !== Mode.IDLE && clientID !== null) {
             throw Error(`Canvas is busy. Action: ${this.data.mode}`);
         }
         if (typeof clientID === 'number') {
@@ -323,18 +353,52 @@ export class Canvas3dModelImpl extends MasterImpl implements Canvas3dModel {
             return;
         }
         this.data.mode = groupData.enabled ? Mode.GROUP : Mode.IDLE;
-        this.data.groupData = { ...this.data.groupData, ...groupData };
+        this.data.groupData = { ...groupData };
         this.notify(UpdateReasons.GROUP);
     }
 
+    public split(splitData: SplitData): void {
+        if (![Mode.IDLE, Mode.SPLIT].includes(this.data.mode)) {
+            throw Error(`Canvas is busy. Action: ${this.data.mode}`);
+        }
+
+        this.data.mode = splitData.enabled ? Mode.SPLIT : Mode.IDLE;
+        this.data.splitData = { ...splitData };
+        this.notify(UpdateReasons.SPLIT);
+    }
+
+    public merge(mergeData: MergeData): void {
+        if (![Mode.IDLE, Mode.MERGE].includes(this.data.mode)) {
+            throw Error(`Canvas is busy. Action: ${this.data.mode}`);
+        }
+
+        this.data.mode = mergeData.enabled ? Mode.MERGE : Mode.IDLE;
+        this.data.mergeData = { ...mergeData };
+        this.notify(UpdateReasons.MERGE);
+    }
+
     public configureShapes(shapeProperties: ShapeProperties): void {
-        this.data.drawData.enabled = false;
-        this.data.mode = Mode.IDLE;
-        this.cancel();
-        this.data.shapeProperties = {
-            ...shapeProperties,
-        };
-        this.notify(UpdateReasons.OBJECTS_UPDATED);
+        if (typeof shapeProperties.opacity === 'number') {
+            this.data.shapeProperties.opacity = Math.max(0, Math.min(shapeProperties.opacity, 100));
+        }
+
+        if (typeof shapeProperties.selectedOpacity === 'number') {
+            this.data.shapeProperties.selectedOpacity = Math.max(0, Math.min(shapeProperties.selectedOpacity, 100));
+        }
+
+        if (['Label', 'Instance', 'Group'].includes(shapeProperties.colorBy)) {
+            this.data.shapeProperties.colorBy = shapeProperties.colorBy;
+        }
+
+        if (typeof shapeProperties.outlined === 'boolean') {
+            this.data.shapeProperties.outlined = shapeProperties.outlined;
+        }
+
+        if (typeof shapeProperties.outlineColor === 'string') {
+            this.data.shapeProperties.outlineColor = shapeProperties.outlineColor;
+        }
+
+        this.notify(UpdateReasons.SHAPES_CONFIG_UPDATED);
     }
 
     public fit(): void {
@@ -343,6 +407,10 @@ export class Canvas3dModelImpl extends MasterImpl implements Canvas3dModel {
 
     public get groupData(): GroupData {
         return { ...this.data.groupData };
+    }
+
+    public get mergeData(): MergeData {
+        return { ...this.data.mergeData };
     }
 
     public get imageIsDeleted(): boolean {

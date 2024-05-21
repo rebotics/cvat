@@ -3,30 +3,30 @@ version: '3.3'
 services:
   cvat_db:
     container_name: reb_cvat_db
-    image: postgres:10-alpine
+    image: postgres:15-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: root
       POSTGRES_DB: cvat
       POSTGRES_HOST_AUTH_METHOD: trust
     volumes:
-      - ../.db:/var/lib/postgresql/data
+      - reb_cvat_db:/var/lib/postgresql/data
     ports:
-      - 5438:5432
+      - "5438:5432"
 
   cvat_redis:
     container_name: reb_cvat_redis
-    image: redis:4.0-alpine
+    image: redis:7.2.3-alpine
     restart: unless-stopped
     ports:
-      - 6385:6379
+      - "6385:6379"
 
   cvat_opa:
     container_name: reb_cvat_opa
     image: retechlabs/rebotics-cvat-opa:${VERSION:-latest}
     restart: unless-stopped
     ports:
-      - 8181:8181
+      - "8181:8181"
 
   cvat_minio:
     container_name: reb_cvat_minio
@@ -40,4 +40,13 @@ services:
     volumes:
       - ../.s3:/data
     ports:
-      - 9006:9000
+      - "9006:9000"
+
+volumes:
+  reb_cvat_db:
+
+networks:
+  reboticsadmin_default:
+    external: true
+  rebotics-management-django_default:
+    external: true

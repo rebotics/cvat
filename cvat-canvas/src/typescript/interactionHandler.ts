@@ -1,4 +1,5 @@
 // Copyright (C) 2020-2022 Intel Corporation
+// Copyright (C) 2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
@@ -6,7 +7,7 @@ import * as SVG from 'svg.js';
 import consts from './consts';
 import Crosshair from './crosshair';
 import {
-    translateToSVG, PropType, stringifyPoints, translateToCanvas,
+    translateToSVG, PropType, stringifyPoints, translateToCanvas, expandChannels, imageDataToDataURL,
 } from './shared';
 
 import {
@@ -146,13 +147,13 @@ export class InteractionHandlerImpl implements InteractionHandler {
                         _e.stopPropagation();
                         self.remove();
                         this.shapesWereUpdated = true;
-                        const shouldRaiseEvent = this.shouldRaiseEvent(_e.ctrlKey);
                         this.interactionShapes = this.interactionShapes.filter(
                             (shape: SVG.Shape): boolean => shape !== self,
                         );
                         if (this.interactionData.startWithBox && this.interactionShapes.length === 1) {
                             this.interactionShapes[0].style({ visibility: '' });
                         }
+                        const shouldRaiseEvent = this.shouldRaiseEvent(_e.ctrlKey);
                         if (shouldRaiseEvent) {
                             this.onInteraction(this.prepareResult(), true, false);
                         }
@@ -304,6 +305,33 @@ export class InteractionHandlerImpl implements InteractionHandler {
                 .fill({ opacity: this.selectedShapeOpacity, color: 'white' })
                 .addClass('cvat_canvas_interact_intermediate_shape');
             this.selectize(true, this.drawnIntermediateShape, erroredShape);
+        } else if (shapeType === 'mask') {
+            const [left, top, right, bottom] = points.slice(-4);
+            const imageBitmap = expandChannels(255, 255, 255, points);
+
+            const image = this.canvas.image().attr({
+                'color-rendering': 'optimizeQuality',
+                'shape-rendering': 'geometricprecision',
+                'pointer-events': 'none',
+                opacity: 0.5,
+            }).addClass('cvat_canvas_interact_intermediate_shape');
+            image.move(this.geometry.offset + left, this.geometry.offset + top);
+            this.drawnIntermediateShape = image;
+
+            imageDataToDataURL(
+                imageBitmap,
+                right - left + 1,
+                bottom - top + 1,
+                (dataURL: string) => new Promise((resolve, reject) => {
+                    image.loaded(() => {
+                        resolve();
+                    });
+                    image.error(() => {
+                        reject();
+                    });
+                    image.load(dataURL);
+                }),
+            );
         } else {
             throw new Error(
                 `Shape type "${shapeType}" was not implemented at interactionHandler::updateIntermediateShape`,

@@ -1,238 +1,390 @@
 # Copyright (C) 2020-2022 Intel Corporation
+# Copyright (C) 2022-2023 CVAT.ai Corporation
 #
 # SPDX-License-Identifier: MIT
 
+import io
 import os
+import zipfile
+from datetime import datetime, timezone
 from io import BytesIO
+import shutil
+import tempfile
+import zlib
 
+from typing import Optional, Tuple
+
+import cv2
+import PIL.Image
+import pickle # nosec
 from django.conf import settings
-from tempfile import NamedTemporaryFile
+from django.core.cache import caches
+from rest_framework.exceptions import NotFound, ValidationError
 
-from cvat.apps.engine.log import slogger
-from cvat.apps.engine.media_extractors import (
-    Mpeg4ChunkWriter, Mpeg4CompressedChunkWriter, ZipChunkWriter,
-    ZipCompressedChunkWriter, ImageDatasetManifestReader,
-    S3DatasetManifestReader, VideoDatasetManifestReader
-)
-from cvat.apps.engine.models import DataChoice, StorageChoice
-from cvat.apps.engine.models import DimensionType, Data, CloudStorage
-from cvat.apps.engine.cloud_provider import get_cloud_storage_instance, Credentials, Status
-from cvat.apps.engine.utils import md5_hash
-from cvat.apps.engine.constants import FrameQuality
-from cvat.rebotics.cache import default_cache
-from cvat.rebotics.s3_client import s3_client
+from cvat.apps.engine.cloud_provider import (Credentials,
+                                             db_storage_to_storage_instance,
+                                             get_cloud_storage_instance)
+from cvat.apps.engine.log import ServerLogManager
+from cvat.apps.engine.media_extractors import (ImageDatasetManifestReader,
+                                               Mpeg4ChunkWriter,
+                                               Mpeg4CompressedChunkWriter,
+                                               VideoDatasetManifestReader,
+                                               ZipChunkWriter,
+                                               ZipCompressedChunkWriter)
+from cvat.apps.engine.mime_types import mimetypes
+from cvat.apps.engine.models import (DataChoice, DimensionType, Job, Image,
+                                     StorageChoice, CloudStorage)
+from cvat.apps.engine.utils import md5_hash, preload_images
+from utils.dataset_manifest import ImageManifestManager
 
+from cvat.rebotics.cache import s3_media_cache
+from cvat.apps.engine.utils import preload_s3_images
 
-class CacheInteraction:
+slogger = ServerLogManager(__name__)
+
+class MediaCache:
     def __init__(self, dimension=DimensionType.DIM_2D):
-        self._cache = default_cache
         self._dimension = dimension
+        self._cache = caches['media']
 
-    def get_buff_mime(self, chunk_number, quality, db_data):
-        if settings.USE_CACHE_S3:
-            return self._get_s3_buff_mime(chunk_number, quality, db_data)
-        else:
-            return self._get_cached_buff_mime(chunk_number, quality, db_data)
+    def _get_or_set_cache_item(self, key, create_function):
+        def create_item():
+            slogger.glob.info(f'Starting to prepare chunk: key {key}')
+            item = create_function()
+            slogger.glob.info(f'Ending to prepare chunk: key {key}')
 
-    def _get_cached_buff_mime(self, chunk_number, quality, db_data):
-        chunk, tag = self._cache.get('{}_{}_{}'.format(db_data.id, chunk_number, quality), tag=True)
+            if item[0]:
+                item = (item[0], item[1], zlib.crc32(item[0].getbuffer()))
+                self._cache.set(key, item)
 
-        if not chunk:
-            chunk, tag = self.prepare_chunk_buff(db_data, quality, chunk_number)
-            self._save_chunk(db_data.id, chunk_number, quality, chunk, tag)
-        return chunk, tag
+            return item
 
-    def _get_s3_buff_mime(self, chunk_number, quality, db_data):
-        key = db_data.get_s3_chunk_path(chunk_number, quality)
+        slogger.glob.info(f'Starting to get chunk from cache: key {key}')
         try:
-            tag = s3_client.get_tags(key)['mime_type']
-        except Exception:  # TODO: better handling.
-            slogger.glob.info('Chunk {} not found, creating.'.format(key))
-            chunk, tag = self.prepare_chunk_buff(db_data, quality, chunk_number)
-            self._save_s3_chunk(db_data, chunk_number, quality, chunk, tag)
-        return key, tag
+            item = self._cache.get(key)
+        except pickle.UnpicklingError:
+            slogger.glob.error(f'Unable to get item from cache: key {key}', exc_info=True)
+            item = None
+        slogger.glob.info(f'Ending to get chunk from cache: key {key}, is_cached {bool(item)}')
 
-    def prepare_chunk_buff(self, db_data, quality, chunk_number):
+        if not item:
+            item = create_item()
+        else:
+            # compare checksum
+            item_data = item[0].getbuffer() if isinstance(item[0], io.BytesIO) else item[0]
+            item_checksum = item[2] if len(item) == 3 else None
+            if item_checksum != zlib.crc32(item_data):
+                slogger.glob.info(f'Recreating cache item {key} due to checksum mismatch')
+                item = create_item()
+
+        return item[0], item[1]
+
+    def get_task_chunk_data_with_mime(self, chunk_number, quality, db_data):
+        item = self._get_or_set_cache_item(
+            key=f'{db_data.id}_{chunk_number}_{quality}',
+            create_function=lambda: self._prepare_task_chunk(db_data, quality, chunk_number),
+        )
+
+        return item
+
+    def get_selective_job_chunk_data_with_mime(self, chunk_number, quality, job):
+        item = self._get_or_set_cache_item(
+            key=f'job_{job.id}_{chunk_number}_{quality}',
+            create_function=lambda: self.prepare_selective_job_chunk(job, quality, chunk_number),
+        )
+
+        return item
+
+    def get_local_preview_with_mime(self, frame_number, db_data):
+        item = self._get_or_set_cache_item(
+            key=f'data_{db_data.id}_{frame_number}_preview',
+            create_function=lambda: self._prepare_local_preview(frame_number, db_data),
+        )
+
+        return item
+
+    def get_cloud_preview_with_mime(
+        self,
+        db_storage: CloudStorage,
+    ) -> Optional[Tuple[io.BytesIO, str]]:
+        key = f'cloudstorage_{db_storage.id}_preview'
+        return self._cache.get(key)
+
+    def get_or_set_cloud_preview_with_mime(
+        self,
+        db_storage: CloudStorage,
+    ) -> Tuple[io.BytesIO, str]:
+        key = f'cloudstorage_{db_storage.id}_preview'
+
+        item = self._get_or_set_cache_item(
+            key, create_function=lambda: self._prepare_cloud_preview(db_storage)
+        )
+
+        return item
+
+    def get_frame_context_images(self, db_data, frame_number):
+        item = self._get_or_set_cache_item(
+            key=f'context_image_{db_data.id}_{frame_number}',
+            create_function=lambda: self._prepare_context_image(db_data, frame_number)
+        )
+
+        return item
+
+    @staticmethod
+    def _get_frame_provider_class():
+        from cvat.apps.engine.frame_provider import \
+            FrameProvider  # TODO: remove circular dependency
+        return FrameProvider
+
+    from contextlib import contextmanager
+
+    @staticmethod
+    @contextmanager
+    def _get_images(db_data, chunk_number, dimension):
+        images = []
+        tmp_dir = None
         upload_dir = {
-                StorageChoice.LOCAL: db_data.get_upload_dirname(),
-                StorageChoice.SHARE: settings.SHARE_ROOT,
-        }.get(db_data.storage, None)
-
-        if hasattr(db_data, 'video'):
-            images = self._get_frames(db_data, upload_dir, chunk_number)
-        elif db_data.storage == StorageChoice.CLOUD_STORAGE:
-            images = self._get_cloud_storage_images(db_data, chunk_number)
-        elif settings.USE_S3:
-            images = self._get_s3_images(db_data, chunk_number)
-        else:
-            images = self._get_local_images(db_data, upload_dir, chunk_number)
-
-        writer, mime_type = self._get_writer(db_data, quality)
-        buff = BytesIO()
-        writer.save_as_chunk(images, buff)
-        buff.seek(0)
-
-        # clear local files
-        if db_data.storage == StorageChoice.CLOUD_STORAGE or settings.USE_S3:
-            for image in images:
-                if os.path.exists(image[0]):
-                    os.remove(image[0])
-
-        return buff, mime_type
-
-    def _save_chunk(self, db_data_id, chunk_number, quality, buff, mime_type):
-        self._cache.set('{}_{}_{}'.format(db_data_id, chunk_number, quality), buff,
-                        expire=settings.CACHE_EXPIRE, tag=mime_type)
-
-    def _save_s3_chunk(self, db_data: Data, chunk_number, quality, buff, mime_type):
-        key = db_data.get_s3_chunk_path(chunk_number, quality)
-        s3_client.upload_from_io(buff, key)
-        s3_client.set_tags(key, {'mime_type': mime_type})
-
-    def _get_frames(self, db_data, upload_dir, chunk_number):
-        source_path = os.path.join(upload_dir, db_data.video.path)
-
-        reader = VideoDatasetManifestReader(
-            manifest_path=db_data.get_manifest_path(),
-            source_path=source_path, chunk_number=chunk_number,
-            chunk_size=db_data.chunk_size, start=db_data.start_frame,
-            stop=db_data.stop_frame, step=db_data.get_frame_step()
-        )
-
-        images = []
-        for frame in reader:
-            images.append((frame, source_path, None))
-        return images
-
-    def _get_s3_images(self, db_data: Data, chunk_number):
-        reader = S3DatasetManifestReader(
-            manifest_path=db_data.get_s3_manifest_path(),
-            chunk_number=chunk_number, chunk_size=db_data.chunk_size,
-            start=db_data.start_frame, stop=db_data.stop_frame,
-            step=db_data.get_frame_step()
-        )
-
-        images = []
-        for item in reader:
-            file_name = f"{item['name']}{item['extension']}"
-            key = db_data.get_s3_uploaded_file_path(file_name)
-            path = s3_client.download_to_temp(key, suffix=file_name.replace(os.path.sep, '#'))
-            self._validate_checksum(item, path, file_name, slogger.glob)
-            images.append((path, path, None))
-
-        return images
-
-    def _get_cloud_storage_images(self, db_data: Data, chunk_number):
-        reader = ImageDatasetManifestReader(
-            manifest_path=db_data.get_manifest_path(),
-            chunk_number=chunk_number, chunk_size=db_data.chunk_size,
-            start=db_data.start_frame, stop=db_data.stop_frame,
-            step=db_data.get_frame_step()
-        )
-
-        cloud_storage = None
-        file_name = None
-        db_cloud_storage = db_data.cloud_storage
-        details = self._get_cloud_storage_details(db_cloud_storage)
+            StorageChoice.LOCAL: db_data.get_s3_upload_dirname(),
+            StorageChoice.SHARE: settings.SHARE_ROOT,
+            StorageChoice.CLOUD_STORAGE: db_data.get_upload_dirname(),
+        }[db_data.storage]
 
         try:
-            cloud_storage = get_cloud_storage_instance(
-                cloud_provider=db_cloud_storage.provider_type,
-                **details
-            )
+            if hasattr(db_data, 'video'):
+                source_path = os.path.join(upload_dir, db_data.video.path)
 
-            images = []
-            for item in reader:
-                file_name = f"{item['name']}{item['extension']}"
-                with NamedTemporaryFile(mode='w+b', prefix='cvat',
-                                        suffix=file_name.replace(os.path.sep, '#'),
-                                        delete=False) as temp_file:
-                    buf = cloud_storage.download_fileobj(file_name)
-                    temp_file.write(buf.getvalue())
-                    temp_file.flush()
-                    source_path = temp_file.name
-                self._validate_checksum(item, source_path, file_name,
-                                        slogger.cloud_storage[db_cloud_storage.id])
-                images.append((source_path, source_path, None))
-            return images
-        except Exception as e:
-            msg = self._get_cloud_storage_err_msg(e, cloud_storage, file_name)
-            raise Exception(msg)
+                reader = VideoDatasetManifestReader(manifest_path=db_data.get_manifest_path(),
+                    source_path=source_path, chunk_number=chunk_number,
+                    chunk_size=db_data.chunk_size, start=db_data.start_frame,
+                    stop=db_data.stop_frame, step=db_data.get_frame_step())
+                for frame in reader:
+                    images.append((frame, source_path, None))
+            else:
+                reader = ImageDatasetManifestReader(manifest_path=db_data.get_s3_manifest_path(),
+                    chunk_number=chunk_number, chunk_size=db_data.chunk_size,
+                    start=db_data.start_frame, stop=db_data.stop_frame,
+                    step=db_data.get_frame_step())
+                if db_data.storage == StorageChoice.CLOUD_STORAGE:
+                    db_cloud_storage = db_data.cloud_storage
+                    assert db_cloud_storage, 'Cloud storage instance was deleted'
+                    credentials = Credentials()
+                    credentials.convert_from_db({
+                        'type': db_cloud_storage.credentials_type,
+                        'value': db_cloud_storage.credentials,
+                    })
+                    details = {
+                        'resource': db_cloud_storage.resource,
+                        'credentials': credentials,
+                        'specific_attributes': db_cloud_storage.get_specific_attributes()
+                    }
+                    cloud_storage_instance = get_cloud_storage_instance(cloud_provider=db_cloud_storage.provider_type, **details)
 
-    def _validate_checksum(self, manifest_item, file_path, file_name, logger):
-        checksum = manifest_item.get('checksum', None)
-        if not checksum:
-            logger.warning('A manifest file does not contain checksum for image {}'
-                           .format(manifest_item.get('name')))
-        if checksum and not md5_hash(file_path) == checksum:
-            logger.warning('Hash sums of files {} do not match'.format(file_name))
+                    tmp_dir = tempfile.mkdtemp(prefix='cvat')
+                    files_to_download = []
+                    checksums = []
+                    for item in reader:
+                        file_name = f"{item['name']}{item['extension']}"
+                        fs_filename = os.path.join(tmp_dir, file_name)
 
-    def _get_cloud_storage_details(self, db_cloud_storage: CloudStorage):
-        assert db_cloud_storage, 'Cloud storage instance was deleted'
-        credentials = Credentials()
-        credentials.convert_from_db({
-            'type': db_cloud_storage.credentials_type,
-            'value': db_cloud_storage.credentials,
-        })
-        return {
-            'resource': db_cloud_storage.resource,
-            'credentials': credentials,
-            'specific_attributes': db_cloud_storage.get_specific_attributes()
-        }
+                        files_to_download.append(file_name)
+                        checksums.append(item.get('checksum', None))
+                        images.append((fs_filename, fs_filename, None))
 
-    def _get_cloud_storage_err_msg(self, e, storage, file_name):
-        if storage is not None:
-            storage_status = storage.get_status()
-            if storage_status == Status.FORBIDDEN:
-                return 'The resource {} is no longer available. Access forbidden.'\
-                    .format(storage.name)
-            elif storage_status == Status.NOT_FOUND:
-                return 'The resource {} not found. It may have been deleted.'\
-                    .format(storage.name)
-            elif file_name is not None:
-                file_status = storage.get_file_status(file_name)
-                if file_status == Status.NOT_FOUND:
-                    return "'{}' not found on the cloud storage '{}'"\
-                        .format(file_name, storage.name)
-                elif file_status == Status.FORBIDDEN:
-                    return "Access to the file '{}' on the '{}' cloud storage is denied"\
-                        .format(file_name, storage.name)
-        return str(e)
+                    cloud_storage_instance.bulk_download_to_dir(files=files_to_download, upload_dir=tmp_dir)
+                    images = preload_images(images)
 
-    def _get_local_images(self, db_data: Data, upload_dir, chunk_number):
-        reader = ImageDatasetManifestReader(
-            manifest_path=db_data.get_manifest_path(),
-            chunk_number=chunk_number, chunk_size=db_data.chunk_size,
-            start=db_data.start_frame, stop=db_data.stop_frame,
-            step=db_data.get_frame_step()
-        )
+                    for checksum, (_, fs_filename, _) in zip(checksums, images):
+                        if checksum and not md5_hash(fs_filename) == checksum:
+                            slogger.cloud_storage[db_cloud_storage.id].warning('Hash sums of files {} do not match'.format(file_name))
+                else:
+                    for item in reader:
+                        source_path = os.path.join(upload_dir, f"{item['name']}{item['extension']}")
+                        images.append((source_path, source_path, None))
+                    if dimension == DimensionType.DIM_2D:
+                        images = preload_s3_images(images)
 
-        images = []
-        for item in reader:
-            source_path = os.path.join(upload_dir, f"{item['name']}{item['extension']}")
-            images.append((source_path, source_path, None))
-        return images
+            yield images
+        finally:
+            if db_data.storage == StorageChoice.CLOUD_STORAGE and tmp_dir is not None:
+                shutil.rmtree(tmp_dir)
 
-    def _get_writer(self, db_data, quality):
+    def _prepare_task_chunk(self, db_data, quality, chunk_number):
+        FrameProvider = self._get_frame_provider_class()
+
         writer_classes = {
-            FrameQuality.COMPRESSED:
-                Mpeg4CompressedChunkWriter if db_data.compressed_chunk_type == DataChoice.VIDEO else ZipCompressedChunkWriter,
-            FrameQuality.ORIGINAL:
-                Mpeg4ChunkWriter if db_data.original_chunk_type == DataChoice.VIDEO else ZipChunkWriter,
+            FrameProvider.Quality.COMPRESSED : Mpeg4CompressedChunkWriter if db_data.compressed_chunk_type == DataChoice.VIDEO else ZipCompressedChunkWriter,
+            FrameProvider.Quality.ORIGINAL : Mpeg4ChunkWriter if db_data.original_chunk_type == DataChoice.VIDEO else ZipChunkWriter,
         }
 
-        image_quality = 100 if writer_classes[quality] in [
-            Mpeg4ChunkWriter,
-            ZipChunkWriter
-        ] else db_data.image_quality
-        mime_type = 'video/mp4' if writer_classes[quality] in [
-            Mpeg4ChunkWriter,
-            Mpeg4CompressedChunkWriter
-        ] else 'application/zip'
+        image_quality = 100 if writer_classes[quality] in [Mpeg4ChunkWriter, ZipChunkWriter] else db_data.image_quality
+        mime_type = 'video/mp4' if writer_classes[quality] in [Mpeg4ChunkWriter, Mpeg4CompressedChunkWriter] else 'application/zip'
 
         kwargs = {}
         if self._dimension == DimensionType.DIM_3D:
             kwargs["dimension"] = DimensionType.DIM_3D
         writer = writer_classes[quality](image_quality, **kwargs)
 
-        return writer, mime_type
+        buff = BytesIO()
+        with self._get_images(db_data, chunk_number, self._dimension) as images:
+            writer.save_as_chunk(images, buff)
+        buff.seek(0)
+
+        return buff, mime_type
+
+    def prepare_selective_job_chunk(self, db_job: Job, quality, chunk_number: int):
+        db_data = db_job.segment.task.data
+
+        FrameProvider = self._get_frame_provider_class()
+        frame_provider = FrameProvider(db_data, self._dimension)
+
+        frame_set = db_job.segment.frame_set
+        frame_step = db_data.get_frame_step()
+        chunk_frames = []
+
+        writer = ZipCompressedChunkWriter(db_data.image_quality, dimension=self._dimension)
+        dummy_frame = BytesIO()
+        PIL.Image.new('RGB', (1, 1)).save(dummy_frame, writer.IMAGE_EXT)
+
+        if hasattr(db_data, 'video'):
+            frame_size = (db_data.video.width, db_data.video.height)
+        else:
+            frame_size = None
+
+        for frame_idx in range(db_data.chunk_size):
+            frame_idx = (
+                db_data.start_frame + chunk_number * db_data.chunk_size + frame_idx * frame_step
+            )
+            if db_data.stop_frame < frame_idx:
+                break
+
+            frame_bytes = None
+
+            if frame_idx in frame_set:
+                frame_bytes = frame_provider.get_frame(frame_idx, quality=quality)[0]
+
+                if frame_size is not None:
+                    # Decoded video frames can have different size, restore the original one
+
+                    frame = PIL.Image.open(frame_bytes)
+                    if frame.size != frame_size:
+                        frame = frame.resize(frame_size)
+
+                    frame_bytes = BytesIO()
+                    frame.save(frame_bytes, writer.IMAGE_EXT)
+                    frame_bytes.seek(0)
+
+            else:
+                # Populate skipped frames with placeholder data,
+                # this is required for video chunk decoding implementation in UI
+                frame_bytes = BytesIO(dummy_frame.getvalue())
+
+            if frame_bytes is not None:
+                chunk_frames.append((frame_bytes, None, None))
+
+        buff = BytesIO()
+        writer.save_as_chunk(chunk_frames, buff, compress_frames=False,
+            zip_compress_level=1 # these are likely to be many skips in SPECIFIC_FRAMES segments
+        )
+        buff.seek(0)
+
+        return buff, 'application/zip'
+
+    def _prepare_local_preview(self, frame_number, db_data):
+        FrameProvider = self._get_frame_provider_class()
+        frame_provider = FrameProvider(db_data, self._dimension)
+        buff, mime_type = frame_provider.get_preview(frame_number)
+
+        return buff, mime_type
+
+    def _prepare_cloud_preview(self, db_storage):
+        storage = db_storage_to_storage_instance(db_storage)
+        if not db_storage.manifests.count():
+            raise ValidationError('Cannot get the cloud storage preview. There is no manifest file')
+        preview_path = None
+        for manifest_model in db_storage.manifests.all():
+            manifest_prefix = os.path.dirname(manifest_model.filename)
+            full_manifest_path = os.path.join(db_storage.get_storage_dirname(), manifest_model.filename)
+            if not os.path.exists(full_manifest_path) or \
+                    datetime.fromtimestamp(os.path.getmtime(full_manifest_path), tz=timezone.utc) < storage.get_file_last_modified(manifest_model.filename):
+                storage.download_file(manifest_model.filename, full_manifest_path)
+            manifest = ImageManifestManager(
+                os.path.join(db_storage.get_storage_dirname(), manifest_model.filename),
+                db_storage.get_storage_dirname()
+            )
+            # need to update index
+            manifest.set_index()
+            if not len(manifest):
+                continue
+            preview_info = manifest[0]
+            preview_filename = ''.join([preview_info['name'], preview_info['extension']])
+            preview_path = os.path.join(manifest_prefix, preview_filename)
+            break
+        if not preview_path:
+            msg = 'Cloud storage {} does not contain any images'.format(db_storage.pk)
+            slogger.cloud_storage[db_storage.pk].info(msg)
+            raise NotFound(msg)
+
+        buff = storage.download_fileobj(preview_path)
+        mime_type = mimetypes.guess_type(preview_path)[0]
+
+        return buff, mime_type
+
+    def _prepare_context_image(self, db_data, frame_number):
+        zip_buffer = BytesIO()
+        try:
+            image = Image.objects.get(data_id=db_data.id, frame=frame_number)
+        except Image.DoesNotExist:
+            return None, None
+        with zipfile.ZipFile(zip_buffer, 'a', zipfile.ZIP_DEFLATED, False) as zip_file:
+            if not image.related_files.count():
+                return None, None
+            common_path = os.path.commonpath(list(map(lambda x: str(x.path), image.related_files.all())))
+            for i in image.related_files.all():
+                path = os.path.realpath(str(i.path))
+                name = os.path.relpath(str(i.path), common_path)
+                image = cv2.imread(path)
+                success, result = cv2.imencode('.JPEG', image)
+                if not success:
+                    raise Exception('Failed to encode image to ".jpeg" format')
+                zip_file.writestr(f'{name}.jpg', result.tobytes())
+        mime_type = 'application/zip'
+        zip_buffer.seek(0)
+        return zip_buffer, mime_type
+
+
+_MediaCache = MediaCache
+
+
+class S3CacheException(Exception):
+    pass
+
+
+class S3MediaCache(_MediaCache):
+    def __init__(self, dimension=DimensionType.DIM_2D):
+        super().__init__(dimension=dimension)
+        self._cache = s3_media_cache
+
+    def _get_or_set_cache_item(self, key, create_function):
+        slogger.glob.info(f'Getting chunk from cache: key {key}')
+        item = self._cache.get(key, tags=('mime_type',))
+        if not item:
+            slogger.glob.error(f'Failed to get chunk from cache: key {key}')
+            slogger.glob.info(f'Preparing chunk: key {key}')
+            buff, mime_type = create_function()
+            slogger.glob.info(f'Setting chunk to cache: key {key}')
+            item = self._cache.set(key, buff, tags={'mime_type': mime_type})
+            if not item:
+                slogger.glob.error(f'Failed to set chunk to cache: key {key}')
+                raise S3CacheException('Failed to get or set chunk in s3 cache')
+        return item[0], item[1]['mime_type']
+
+    def get_cloud_preview_with_mime(
+        self,
+        db_storage: CloudStorage,
+    ) -> Optional[Tuple[io.BytesIO, str]]:
+        key = f'cloudstorage_{db_storage.id}_preview'
+        item = self._cache.get(key, tags=('mime_type',))
+        return item[0], item[1]['mime_type']
+
+
+MediaCache = S3MediaCache

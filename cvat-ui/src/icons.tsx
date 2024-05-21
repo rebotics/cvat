@@ -1,11 +1,12 @@
 // Copyright (C) 2020-2022 Intel Corporation
-// Copyright (C) 2022 CVAT.ai Corporation
+// Copyright (C) 2022-2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
 import React from 'react';
 
 import SVGCVATLogo from './assets/cvat-logo.svg';
+import SVGCVATIcon from './assets/cvat-icon.svg';
 import SVGCursorIcon from './assets/cursor-icon.svg';
 import SVGMoveIcon from './assets/move-icon.svg';
 import SVGRotateIcon from './assets/rotate-icon.svg';
@@ -48,14 +49,32 @@ import SVGColorizeIcon from './assets/colorize-icon.svg';
 import SVGAITools from './assets/ai-tools-icon.svg';
 import SVGBrain from './assets/brain.svg';
 import SVGOpenCV from './assets/opencv.svg';
-import SVGFilterIcon from './assets/object-filter-icon.svg';
+import SVGFilterIcon from './assets/filter-icon.svg';
 import SVGCVATAzureProvider from './assets/vscode-icons_file-type-azure.svg';
 import SVGCVATS3Provider from './assets/S3.svg';
 import SVGCVATGoogleCloudProvider from './assets/google-cloud.svg';
 import SVGRestoreIcon from './assets/restore-icon.svg';
+import SVGBrushIcon from './assets/brush-icon.svg';
+import SVGEraserIcon from './assets/eraser-icon.svg';
+import SVGPolygonPlusIcon from './assets/polygon-plus.svg';
+import SVGPolygonMinusIcon from './assets/polygon-minus.svg';
 import SVGMultiPlusIcon from './assets/multi-plus-icon.svg';
+import SVGBackArrowIcon from './assets/back-arrow-icon.svg';
+import SVGClearIcon from './assets/clear-icon.svg';
+import SVGShowPasswordIcon from './assets/show-password.svg';
+import SVGPlusIcon from './assets/plus-icon.svg';
+import SVGCheckIcon from './assets/check-icon.svg';
+import SVGGuideIcon from './assets/guide-icon.svg';
+import SVGDurationIcon from './assets/duration-icon.svg';
+import SVGFrameCountIcon from './assets/frame-count-icon.svg';
+import SVGFramesIcon from './assets/frames-icon.svg';
+import SVGConflictIcon from './assets/conflict.svg';
+import SVGShowGroundTruthIcon from './assets/show-gt-icon.svg';
+import SVGJoinIcon from './assets/join-icon.svg';
+import SVGSliceIcon from './assets/slice-icon.svg';
 
 export const CVATLogo = React.memo((): JSX.Element => <SVGCVATLogo />);
+export const CVATIcon = React.memo((): JSX.Element => <SVGCVATIcon />);
 export const CursorIcon = React.memo((): JSX.Element => <SVGCursorIcon />);
 export const MoveIcon = React.memo((): JSX.Element => <SVGMoveIcon />);
 export const RotateIcon = React.memo((): JSX.Element => <SVGRotateIcon />);
@@ -103,4 +122,21 @@ export const AzureProvider = React.memo((): JSX.Element => <SVGCVATAzureProvider
 export const S3Provider = React.memo((): JSX.Element => <SVGCVATS3Provider />);
 export const GoogleCloudProvider = React.memo((): JSX.Element => <SVGCVATGoogleCloudProvider />);
 export const RestoreIcon = React.memo((): JSX.Element => <SVGRestoreIcon />);
-export const MutliPlusIcon = React.memo((): JSX.Element => <SVGMultiPlusIcon />);
+export const BrushIcon = React.memo((): JSX.Element => <SVGBrushIcon />);
+export const EraserIcon = React.memo((): JSX.Element => <SVGEraserIcon />);
+export const PolygonPlusIcon = React.memo((): JSX.Element => <SVGPolygonPlusIcon />);
+export const PolygonMinusIcon = React.memo((): JSX.Element => <SVGPolygonMinusIcon />);
+export const MultiPlusIcon = React.memo((): JSX.Element => <SVGMultiPlusIcon />);
+export const BackArrowIcon = React.memo((): JSX.Element => <SVGBackArrowIcon />);
+export const ClearIcon = React.memo((): JSX.Element => <SVGClearIcon />);
+export const ShowPasswordIcon = React.memo((): JSX.Element => <SVGShowPasswordIcon />);
+export const PlusIcon = React.memo((): JSX.Element => <SVGPlusIcon />);
+export const CheckIcon = React.memo((): JSX.Element => <SVGCheckIcon />);
+export const GuideIcon = React.memo((): JSX.Element => <SVGGuideIcon />);
+export const DurationIcon = React.memo((): JSX.Element => <SVGDurationIcon />);
+export const FrameCountIcon = React.memo((): JSX.Element => <SVGFrameCountIcon />);
+export const FramesIcon = React.memo((): JSX.Element => <SVGFramesIcon />);
+export const ConflictIcon = React.memo((): JSX.Element => <SVGConflictIcon />);
+export const ShowGroundTruthIcon = React.memo((): JSX.Element => <SVGShowGroundTruthIcon />);
+export const JoinIcon = React.memo((): JSX.Element => <SVGJoinIcon />);
+export const SliceIcon = React.memo((): JSX.Element => <SVGSliceIcon />);

@@ -10,7 +10,7 @@ export enum Priority {
     HIGHEST = 50,
 }
 
-export const PriorityColors = new Map([
+export const PriorityColors = new Map<Priority, string | undefined>([
     [Priority.LOWEST, blue.primary],
     [Priority.LOW, cyan.primary],
     [Priority.MEDIUM, yellow.primary],

@@ -1,5 +1,5 @@
 // Copyright (C) 2022 Intel Corporation
-// Copyright (C) CVAT.ai corp
+// Copyright (C) 2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
@@ -9,13 +9,13 @@ import { CombinedState, ObjectType } from 'reducers';
 import Text from 'antd/lib/typography/Text';
 import Modal from 'antd/lib/modal';
 
-import consts from 'consts';
+import config from 'config';
 import { removeObjectAsync, removeObject as removeObjectAction } from 'actions/annotation-actions';
 
 export default function RemoveConfirmComponent(): JSX.Element | null {
     const [visible, setVisible] = useState(false);
     const [title, setTitle] = useState('');
-    const [description, setDescription] = useState<JSX.Element>(<></>);
+    const [description, setDescription] = useState<string | JSX.Element>('');
     const objectState = useSelector((state: CombinedState) => state.annotation.remove.objectState);
     const force = useSelector((state: CombinedState) => state.annotation.remove.force);
     const jobInstance = useSelector((state: CombinedState) => state.annotation.job.instance);
@@ -48,7 +48,7 @@ export default function RemoveConfirmComponent(): JSX.Element | null {
                     </Text>
                     <div className='cvat-remove-object-confirm-wrapper'>
                         {/* eslint-disable-next-line */}
-                        <img src={consts.OUTSIDE_PIC_URL} />
+                        <img src={config.OUTSIDE_PIC_URL} />
                     </div>
                 </>
             );
@@ -68,9 +68,13 @@ export default function RemoveConfirmComponent(): JSX.Element | null {
             cancelText='Cancel'
             title={title}
             visible={visible}
+            cancelButtonProps={{
+                autoFocus: true,
+            }}
             onOk={onOk}
             onCancel={onCancel}
-            className='cvat-modal-confirm'
+            destroyOnClose
+            className='cvat-modal-confirm-remove-object'
         >
             <div>
                 {description}

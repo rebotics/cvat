@@ -1,4 +1,5 @@
 // Copyright (C) 2020-2022 Intel Corporation
+// Copyright (C) 2022-2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
@@ -7,7 +8,7 @@ import {
 } from 'utils/redux';
 import { getCore } from 'cvat-core-wrapper';
 import { LogType } from 'cvat-logger';
-import { computeZRange } from './annotation-actions';
+import { fetchAnnotationsAsync } from './annotation-actions';
 
 const cvat = getCore();
 
@@ -17,23 +18,19 @@ export enum BoundariesActionTypes {
 }
 
 export const boundariesActions = {
-    resetAfterError: (
-        job: any,
-        states: any[],
-        frameNumber: number,
-        frameData: any | null,
-        minZ: number,
-        maxZ: number,
-        colors: string[],
-    ) => createAction(BoundariesActionTypes.RESET_AFTER_ERROR, {
-        job,
-        states,
-        frameNumber,
-        frameData,
-        minZ,
-        maxZ,
-        colors,
-    }),
+    resetAfterError: (payload?: {
+        job: any;
+        states: any[];
+        openTime: number;
+        frameNumber: number;
+        frameFilename: string;
+        relatedFiles: number;
+        colors: string[];
+        filters: string[];
+        frameData: any;
+        minZ: number;
+        maxZ: number;
+    }) => createAction(BoundariesActionTypes.RESET_AFTER_ERROR, payload),
     throwResetError: () => createAction(BoundariesActionTypes.THROW_RESET_ERROR),
 };
 
@@ -45,19 +42,27 @@ export function resetAfterErrorAsync(): ThunkAction {
 
             if (job) {
                 const currentFrame = state.annotation.player.frame.number;
-                const { showAllInterpolationTracks } = state.settings.workspace;
                 const frameNumber = Math.max(Math.min(job.stopFrame, currentFrame), job.startFrame);
-
-                const states = await job.annotations.get(frameNumber, showAllInterpolationTracks, []);
                 const frameData = await job.frames.get(frameNumber);
-                const [minZ, maxZ] = computeZRange(states);
                 const colors = [...cvat.enums.colors];
 
                 await job.logger.log(LogType.restoreJob);
 
-                dispatch(boundariesActions.resetAfterError(job, states, frameNumber, frameData, minZ, maxZ, colors));
-            } else {
-                dispatch(boundariesActions.resetAfterError(null, [], 0, null, 0, 0, []));
+                dispatch(boundariesActions.resetAfterError({
+                    job,
+                    states: [],
+                    openTime: state.annotation.job.openTime || Date.now(),
+                    frameNumber,
+                    frameFilename: frameData.filename,
+                    relatedFiles: frameData.relatedFiles,
+                    colors,
+                    filters: [],
+                    frameData,
+                    minZ: 0,
+                    maxZ: 0,
+                }));
+
+                dispatch(fetchAnnotationsAsync());
             }
         } catch (error) {
             dispatch(boundariesActions.throwResetError());

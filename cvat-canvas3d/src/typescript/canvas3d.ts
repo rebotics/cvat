@@ -1,4 +1,5 @@
 // Copyright (C) 2021-2022 Intel Corporation
+// Copyright (C) 2022-2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
@@ -13,6 +14,8 @@ import {
     MouseInteraction,
     ShapeProperties,
     GroupData,
+    SplitData,
+    MergeData,
 } from './canvas3dModel';
 import {
     Canvas3dView, Canvas3dViewImpl, ViewsDOM, CameraAction,
@@ -36,6 +39,8 @@ interface Canvas3d {
     fitCanvas(): void;
     fit(): void;
     group(groupData: GroupData): void;
+    merge(mergeData: MergeData): void;
+    split(splitData: SplitData): void;
     destroy(): void;
 }
 
@@ -78,6 +83,14 @@ class Canvas3dImpl implements Canvas3d {
         this.model.group(groupData);
     }
 
+    public split(splitData: SplitData): void {
+        this.model.split(splitData);
+    }
+
+    public merge(mergeData: MergeData): void {
+        this.model.merge(mergeData);
+    }
+
     public isAbleToChangeFrame(): boolean {
         return this.model.isAbleToChangeFrame();
     }
@@ -95,7 +108,7 @@ class Canvas3dImpl implements Canvas3d {
     }
 
     public activate(clientID: number | null, attributeID: number | null = null): void {
-        this.model.activate(String(clientID), attributeID);
+        this.model.activate(typeof clientID === 'number' ? String(clientID) : null, attributeID);
     }
 
     public fit(): void {
@@ -112,5 +125,7 @@ class Canvas3dImpl implements Canvas3d {
 }
 
 export {
-    Canvas3dImpl as Canvas3d, Canvas3dVersion, ViewType, MouseInteraction, CameraAction, ViewsDOM, Mode as CanvasMode,
+    Canvas3dImpl as Canvas3d, Canvas3dVersion, ViewType, MouseInteraction, CameraAction, Mode as CanvasMode,
 };
+
+export type { ViewsDOM };

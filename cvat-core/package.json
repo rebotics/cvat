@@ -1,44 +1,44 @@
 {
   "name": "cvat-core",
-  "version": "7.0.0",
+  "version": "14.1.0",
+  "type": "module",
   "description": "Part of Computer Vision Tool which presents an interface for client-side integration",
   "main": "src/api.ts",
   "scripts": {
     "build": "webpack",
-    "test": "jest --config=jest.config.js --coverage",
-    "docs": "jsdoc --readme README.md src/*.js -p -c jsdoc.config.js -d docs",
-    "coveralls": "cat ./reports/coverage/lcov.info | coveralls",
+    "test": "jest --config=jest.config.cjs --coverage",
     "type-check": "tsc --noEmit",
-    "type-check:watch": "yarn run type-check -- --watch"
+    "type-check:watch": "yarn run type-check --watch"
   },
   "author": "CVAT.ai",
   "license": "MIT",
   "browserslist": [
     "Chrome >= 63",
-    "Firefox > 58",
+    "Firefox > 102",
     "not IE 11",
     "> 2%"
   ],
   "devDependencies": {
-    "coveralls": "^3.0.5",
-    "jest": "^26.6.3",
-    "jest-junit": "^6.4.0",
-    "jsdoc": "^3.6.6",
-    "ts-jest": "26"
+    "@babel/preset-typescript": "^7.23.3",
+    "babel-jest": "^29.7.0",
+    "babel-plugin-transform-import-meta": "^2.2.1",
+    "jest": "^29.5.0",
+    "jest-config": "^29.5.0",
+    "jest-environment-jsdom": "^29.5.0",
+    "jest-junit": "^6.4.0"
   },
   "dependencies": {
-    "axios": "^0.27.2",
-    "browser-or-node": "^2.0.0",
-    "cvat-data": "file:../cvat-data",
+    "axios": "^1.6.0",
+    "axios-retry": "^4.0.0",
+    "cvat-data": "link:./../cvat-data",
     "detect-browser": "^5.2.1",
     "error-stack-parser": "^2.0.2",
     "form-data": "^4.0.0",
-    "jest-config": "^28.1.2",
     "js-cookie": "^3.0.1",
     "json-logic-js": "^2.0.1",
     "platform": "^1.3.5",
     "quickhull": "^1.0.3",
     "store": "^2.0.12",
-    "tus-js-client": "^2.3.0"
+    "tus-js-client": "^3.0.1"
   }
 }

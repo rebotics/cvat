@@ -1,19 +1,18 @@
 // Copyright (C) 2020-2022 Intel Corporation
-// Copyright (C) 2022 CVAT.ai Corporation
+// Copyright (C) 2022-2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
-// eslint-disable-next-line import/no-extraneous-dependencies
 import { Canvas3d } from 'cvat-canvas3d/src/typescript/canvas3d';
 import { Canvas, RectDrawingMethod, CuboidDrawingMethod } from 'cvat-canvas-wrapper';
-import { Webhook } from 'cvat-core-wrapper';
+import {
+    Webhook, MLModel, Organization, Job, Label,
+    QualityReport, QualityConflict, QualitySettings, FramesMetaData, RQStatus, EventLogger, Invitation,
+} from 'cvat-core-wrapper';
 import { IntelligentScissors } from 'utils/opencv-wrapper/intelligent-scissors';
 import { KeyMap } from 'utils/mousetrap-react';
 import { OpenCVTracker } from 'utils/opencv-wrapper/opencv-interfaces';
-
-export type StringObject = {
-    [index: string]: string;
-};
+import { ImageFilter } from 'utils/image-processing';
 
 export interface AuthState {
     initialized: boolean;
@@ -24,6 +23,7 @@ export interface AuthState {
     showChangePasswordDialog: boolean;
     allowChangePassword: boolean;
     allowResetPassword: boolean;
+    hasEmailVerificationBeenSent: boolean;
 }
 
 export interface ProjectsQuery {
@@ -34,16 +34,22 @@ export interface ProjectsQuery {
     sort: string | null;
 }
 
-export interface Project {
-    instance: any;
+interface Preview {
+    fetching: boolean;
+    initialized: boolean;
     preview: string;
 }
+
+export type Project = any;
 
 export interface ProjectsState {
     initialized: boolean;
     fetching: boolean;
     count: number;
     current: Project[];
+    previews: {
+        [index: number]: Preview;
+    };
     gettingQuery: ProjectsQuery;
     tasksGettingQuery: TasksQuery & { ordering: string };
     activities: {
@@ -66,10 +72,7 @@ export interface TasksQuery {
     projectId: number | null;
 }
 
-export interface Task {
-    instance: any; // cvat-core instance
-    preview: string;
-}
+export type Task = any; // cvat-core instance
 
 export interface JobsQuery {
     page: number;
@@ -82,26 +85,20 @@ export interface JobsState {
     query: JobsQuery;
     fetching: boolean;
     count: number;
-    current: any[];
-    previews: string[];
-}
-
-export interface ImageSearchResult {
-    name: string;
-    jobId: number;
-    frame: number;
-}
-
-export interface ImageSearch {
-    query: string | null;
-    results: ImageSearchResult[];
+    current: Job[];
+    previews: {
+        [index: number]: Preview;
+    };
+    activities: {
+        deletes: {
+            [tid: number]: boolean;
+        };
+    };
 }
 
 export interface TasksState {
     initialized: boolean;
     fetching: boolean;
-    updating: boolean;
-    hideEmpty: boolean;
     moveTask: {
         modalVisible: boolean;
         taskId: number | null;
@@ -109,15 +106,14 @@ export interface TasksState {
     gettingQuery: TasksQuery;
     count: number;
     current: Task[];
+    previews: {
+        [index: number]: Preview;
+    };
     activities: {
         deletes: {
             [tid: number]: boolean; // deleted (deleting if in dictionary)
         };
-        jobUpdates: {
-            [jid: number]: boolean,
-        };
     };
-    imageSearch: ImageSearch;
 }
 
 export interface ExportState {
@@ -214,14 +210,11 @@ export interface CloudStoragesQuery {
     filter: string | null;
 }
 
-interface CloudStorageAdditional {
+interface CloudStorageStatus {
     fetching: boolean;
     initialized: boolean;
     status: string | null;
-    preview: string;
 }
-type CloudStorageStatus = Pick<CloudStorageAdditional, 'fetching' | 'initialized' | 'status'>;
-type CloudStoragePreview = Pick<CloudStorageAdditional, 'fetching' | 'initialized' | 'preview'>;
 
 export type CloudStorage = any;
 
@@ -234,7 +227,7 @@ export interface CloudStoragesState {
         [index: number]: CloudStorageStatus;
     };
     previews: {
-        [index: number]: CloudStoragePreview;
+        [index: number]: Preview;
     };
     gettingQuery: CloudStoragesQuery;
     activities: {
@@ -261,20 +254,84 @@ export interface CloudStoragesState {
 }
 
 export enum SupportedPlugins {
-    GIT_INTEGRATION = 'GIT_INTEGRATION',
     ANALYTICS = 'ANALYTICS',
     MODELS = 'MODELS',
-    PREDICT = 'PREDICT',
 }
 
 export type PluginsList = {
     [name in SupportedPlugins]: boolean;
 };
 
+export interface PluginComponent {
+    component: any;
+    data: {
+        weight: number;
+        shouldBeRendered: (props?: object, state?: object) => boolean;
+    };
+}
+
 export interface PluginsState {
     fetching: boolean;
     initialized: boolean;
     list: PluginsList;
+    current: {
+        [index: string]: {
+            destructor: CallableFunction;
+            globalStateDidUpdate?: CallableFunction;
+        };
+    };
+    components: {
+        header: {
+            userMenu: {
+                items: PluginComponent[],
+            };
+        };
+        loginPage: {
+            loginForm: PluginComponent[];
+        };
+        modelsPage: {
+            topBar: {
+                items: PluginComponent[],
+            },
+            modelItem: {
+                menu: {
+                    items: PluginComponent[],
+                },
+                topBar:{
+                    menu: {
+                        items: PluginComponent[],
+                    }
+                },
+            }
+        };
+        projectActions: {
+            items: PluginComponent[];
+        };
+        taskActions: {
+            items: PluginComponent[];
+        };
+        taskItem: {
+            ribbon: PluginComponent[];
+        };
+        projectItem: {
+            ribbon: PluginComponent[];
+        };
+        annotationPage: {
+            header: {
+                player: PluginComponent[];
+            };
+        };
+        settings: {
+            player: PluginComponent[];
+        }
+        about: {
+            links: {
+                items: PluginComponent[];
+            }
+        }
+        router: PluginComponent[];
+        loggedInModals: PluginComponent[];
+    }
 }
 
 export interface AboutState {
@@ -290,8 +347,9 @@ export interface AboutState {
 
 export interface UserAgreement {
     name: string;
-    displayText: string;
+    urlDisplayText: string;
     url: string;
+    textPrefix: string;
     required: boolean;
 }
 
@@ -301,23 +359,7 @@ export interface UserAgreementsState {
     initialized: boolean;
 }
 
-export interface ShareFileInfo {
-    // get this data from cvat-core
-    name: string;
-    type: 'DIR' | 'REG';
-    mime_type: string;
-}
-
-export interface ShareItem {
-    name: string;
-    type: 'DIR' | 'REG';
-    mime_type: string;
-    children: ShareItem[];
-}
-
-export interface ShareState {
-    root: ShareItem;
-}
+export type RemoteFileType = 'DIR' | 'REG';
 
 export interface ModelAttribute {
     name: string;
@@ -325,22 +367,12 @@ export interface ModelAttribute {
     input_type: 'select' | 'number' | 'checkbox' | 'radio' | 'text';
 }
 
-export interface Model {
-    id: string;
-    name: string;
-    labels: string[];
-    attributes: Record<string, ModelAttribute[]>;
-    framework: string;
-    description: string;
-    type: string;
-    onChangeToolsBlockerState: (event: string) => void;
-    tip: {
-        message: string;
-        gif: string;
-    };
-    params: {
-        canvas: Record<string, number | boolean>;
-    };
+export interface ModelsQuery {
+    page: number;
+    id: number | null;
+    search: string | null;
+    filter: string | null;
+    sort: string | null;
 }
 
 export type OpenCVTool = IntelligentScissors | OpenCVTracker;
@@ -356,45 +388,39 @@ export enum TaskStatus {
     COMPLETED = 'completed',
 }
 
-export enum JobStage {
-    ANNOTATION = 'annotation',
-    REVIEW = 'validation',
-    ACCEPTANCE = 'acceptance',
-}
-
-export enum RQStatus {
-    unknown = 'unknown',
-    queued = 'queued',
-    started = 'started',
-    finished = 'finished',
-    failed = 'failed',
-}
-
 export interface ActiveInference {
     status: RQStatus;
     progress: number;
     error: string;
     id: string;
+    functionID: string | number;
 }
 
 export interface ModelsState {
     initialized: boolean;
     fetching: boolean;
     creatingStatus: string;
-    interactors: Model[];
-    detectors: Model[];
-    trackers: Model[];
-    reid: Model[];
+    interactors: MLModel[];
+    detectors: MLModel[];
+    trackers: MLModel[];
+    reid: MLModel[];
+    classifiers: MLModel[];
+    totalCount: number;
     inferences: {
         [index: number]: ActiveInference;
     };
     modelRunnerIsVisible: boolean;
     modelRunnerTask: any;
+    query: ModelsQuery;
+    previews: {
+        [index: string]: Preview;
+    };
 }
 
 export interface ErrorState {
     message: string;
-    reason: string;
+    reason: Error;
+    shouldLog?: boolean;
     className?: string;
 }
 
@@ -433,6 +459,8 @@ export interface NotificationsState {
         jobs: {
             updating: null | ErrorState;
             fetching: null | ErrorState;
+            creating: null | ErrorState;
+            deleting: null | ErrorState;
         };
         formats: {
             fetching: null | ErrorState;
@@ -443,26 +471,26 @@ export interface NotificationsState {
         about: {
             fetching: null | ErrorState;
         };
-        share: {
-            fetching: null | ErrorState;
-        };
         models: {
             starting: null | ErrorState;
             fetching: null | ErrorState;
             canceling: null | ErrorState;
             metaFetching: null | ErrorState;
             inferenceStatusFetching: null | ErrorState;
+            creating: null | ErrorState;
+            deleting: null | ErrorState;
         };
         annotation: {
             saving: null | ErrorState;
             jobFetching: null | ErrorState;
             frameFetching: null | ErrorState;
-            contextImageFetching: null | ErrorState;
             changingLabelColor: null | ErrorState;
             updating: null | ErrorState;
             creating: null | ErrorState;
             merging: null | ErrorState;
             grouping: null | ErrorState;
+            joining: null | ErrorState;
+            slicing: null | ErrorState;
             splitting: null | ErrorState;
             removing: null | ErrorState;
             propagating: null | ErrorState;
@@ -478,6 +506,7 @@ export interface NotificationsState {
             deleteFrame: null | ErrorState;
             restoreFrame: null | ErrorState;
             savingLogs: null | ErrorState;
+            canvas: null | ErrorState;
         };
         boundaries: {
             resetError: null | ErrorState;
@@ -492,9 +521,6 @@ export interface NotificationsState {
             commentingIssue: null | ErrorState;
             submittingReview: null | ErrorState;
             deletingIssue: null | ErrorState;
-        };
-        predictor: {
-            prediction: null | ErrorState;
         };
         exporting: {
             dataset: null | ErrorState;
@@ -522,6 +548,7 @@ export interface NotificationsState {
             inviting: null | ErrorState;
             updatingMembership: null | ErrorState;
             removingMembership: null | ErrorState;
+            deletingInvitation: null | ErrorState;
         };
         webhooks: {
             fetching: null | ErrorState;
@@ -529,6 +556,17 @@ export interface NotificationsState {
             updating: null | ErrorState;
             deleting: null | ErrorState;
         };
+        analytics: {
+            fetching: null | ErrorState;
+            fetchingSettings: null | ErrorState;
+            updatingSettings: null | ErrorState;
+        };
+        invitations: {
+            fetching: null | ErrorState;
+            acceptingInvitation: null | ErrorState;
+            decliningInvitation: null | ErrorState;
+            resendingInvitation: null | ErrorState;
+        }
     };
     messages: {
         tasks: {
@@ -558,6 +596,12 @@ export interface NotificationsState {
             annotation: string;
             backup: string;
         };
+        invitations: {
+            newInvitations: string;
+            acceptInvitationDone: string;
+            declineInvitationDone: string;
+            resendingInvitation: string;
+        }
     };
 }
 
@@ -570,11 +614,14 @@ export enum ActiveControl {
     DRAW_POLYLINE = 'draw_polyline',
     DRAW_POINTS = 'draw_points',
     DRAW_ELLIPSE = 'draw_ellipse',
+    DRAW_MASK = 'draw_mask',
     DRAW_CUBOID = 'draw_cuboid',
     DRAW_SKELETON = 'draw_skeleton',
     MERGE = 'merge',
     GROUP = 'group',
+    JOIN = 'join',
     SPLIT = 'split',
+    SLICE = 'slice',
     EDIT = 'edit',
     OPEN_ISSUE = 'open_issue',
     AI_TOOLS = 'ai_tools',
@@ -589,6 +636,7 @@ export enum ShapeType {
     POINTS = 'points',
     ELLIPSE = 'ellipse',
     CUBOID = 'cuboid',
+    MASK = 'mask',
     SKELETON = 'skeleton',
 }
 
@@ -602,6 +650,7 @@ export enum StatesOrdering {
     ID_DESCENT = 'ID - descent',
     ID_ASCENT = 'ID - ascent',
     UPDATED = 'Updated time',
+    Z_ORDER = 'Z Order',
 }
 
 export enum ContextMenuType {
@@ -612,19 +661,6 @@ export enum ContextMenuType {
 export enum Rotation {
     ANTICLOCKWISE90,
     CLOCKWISE90,
-}
-
-export interface PredictorState {
-    timeRemaining: number;
-    progress: number;
-    projectScore: number;
-    message: string;
-    error: Error | null;
-    enabled: boolean;
-    fetching: boolean;
-    annotationAmount: number;
-    mediaAmount: number;
-    annotatedFrames: number[];
 }
 
 export interface AnnotationState {
@@ -644,15 +680,23 @@ export interface AnnotationState {
             parentID: number | null;
             clientID: number | null;
         };
+        brushTools: {
+            visible: boolean;
+            top: number;
+            left: number;
+        };
         instance: Canvas | Canvas3d | null;
         ready: boolean;
         activeControl: ActiveControl;
     };
     job: {
         openTime: null | number;
-        labels: any[];
+        labels: Label[];
         requestedId: number | null;
-        instance: any | null | undefined;
+        instance: Job | null | undefined;
+        initialOpenGuide: boolean;
+        groundTruthJobFramesMeta: FramesMetaData | null;
+        groundTruthInstance: Job | null;
         attributes: Record<number, any[]>;
         fetching: boolean;
         saving: boolean;
@@ -661,28 +705,25 @@ export interface AnnotationState {
         frame: {
             number: number;
             filename: string;
-            hasRelatedContext: boolean;
+            relatedFiles: number;
             data: any | null;
             fetching: boolean;
             delay: number;
             changeTime: number | null;
+            changeFrameLog: EventLogger | null;
         };
+        ranges: string;
         navigationBlocked: boolean;
         playing: boolean;
         frameAngles: number[];
-        contextImage: {
-            fetching: boolean;
-            data: string | null;
-            hidden: boolean;
-        };
     };
     drawing: {
-        activeInteractor?: Model | OpenCVTool;
+        activeInteractor?: MLModel | OpenCVTool;
         activeShapeType: ShapeType;
         activeRectDrawingMethod?: RectDrawingMethod;
         activeCuboidDrawingMethod?: CuboidDrawingMethod;
         activeNumOfPoints?: number;
-        activeLabelID: number;
+        activeLabelID: number | null;
         activeObjectType: ObjectType;
         activeInitialState?: any;
     };
@@ -690,10 +731,11 @@ export interface AnnotationState {
         activatedStateID: number | null;
         activatedElementID: number | null;
         activatedAttributeID: number | null;
+        highlightedConflict: QualityConflict | null;
         collapsed: Record<number, boolean>;
         collapsedAll: boolean;
         states: any[];
-        filters: any[];
+        filters: object[];
         resetGroupFlag: boolean;
         history: {
             undo: [string, number][];
@@ -702,17 +744,12 @@ export interface AnnotationState {
         saving: {
             forceExit: boolean;
             uploading: boolean;
-            statuses: string[];
         };
         zLayer: {
             min: number;
             max: number;
             cur: number;
         };
-    };
-    propagate: {
-        objectState: any | null;
-        frames: number;
     };
     remove: {
         objectState: any;
@@ -723,12 +760,14 @@ export interface AnnotationState {
         visible: boolean;
         data: any;
     };
+    propagate: {
+        visible: boolean;
+    };
     colors: any[];
     filtersPanelVisible: boolean;
     sidebarCollapsed: boolean;
     appearanceCollapsed: boolean;
     workspace: Workspace;
-    predictor: PredictorState;
 }
 
 export enum Workspace {
@@ -804,6 +843,7 @@ export interface ShapesSettingsState {
     outlineColor: string;
     showBitmap: boolean;
     showProjections: boolean;
+    showGroundTruth: boolean;
     lineWidth: number;
 }
 
@@ -811,6 +851,7 @@ export interface SettingsState {
     shapes: ShapesSettingsState;
     workspace: WorkspaceSettingsState;
     player: PlayerSettingsState;
+    imageFilters: ImageFilter[];
     showDialog: boolean;
 }
 
@@ -838,6 +879,8 @@ export interface ReviewState {
     newIssuePosition: number[] | null;
     issuesHidden: boolean;
     issuesResolvedHidden: boolean;
+    conflicts: QualityConflict[];
+    frameConflicts: QualityConflict[];
     fetching: {
         jobId: number | null;
         issueId: number | null;
@@ -845,11 +888,9 @@ export interface ReviewState {
 }
 
 export interface OrganizationState {
-    list: any[];
-    current: any | null;
+    current?: Organization | null;
     initialized: boolean;
     fetching: boolean;
-    creating: boolean;
     updating: boolean;
     inviting: boolean;
     leaving: boolean;
@@ -873,13 +914,44 @@ export interface WebhooksState {
     query: WebhooksQuery;
 }
 
+export interface QualityQuery {
+    taskId: number | null;
+    jobId: number | null;
+    parentId: number | null;
+}
+
+export interface AnalyticsState {
+    fetching: boolean;
+    quality: {
+        tasksReports: QualityReport[];
+        jobsReports: QualityReport[];
+        query: QualityQuery;
+        settings: {
+            modalVisible: boolean;
+            current: QualitySettings | null;
+            fetching: boolean;
+        }
+    }
+}
+
+export interface InvitationsQuery {
+    page: number;
+}
+
+export interface InvitationsState {
+    fetching: boolean;
+    initialized: boolean;
+    current: Invitation[];
+    count: number;
+    query: InvitationsQuery;
+}
+
 export interface CombinedState {
     auth: AuthState;
     projects: ProjectsState;
     jobs: JobsState;
     tasks: TasksState;
     about: AboutState;
-    share: ShareState;
     formats: FormatsState;
     userAgreements: UserAgreementsState;
     plugins: PluginsState;
@@ -893,12 +965,9 @@ export interface CombinedState {
     import: ImportState;
     cloudStorages: CloudStoragesState;
     organizations: OrganizationState;
+    invitations: InvitationsState;
     webhooks: WebhooksState;
-}
-
-export enum DimensionType {
-    DIM_3D = '3d',
-    DIM_2D = '2d',
+    analytics: AnalyticsState;
 }
 
 export interface Indexable {

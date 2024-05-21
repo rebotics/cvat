@@ -1,17 +1,16 @@
 // Copyright (C) 2020-2022 Intel Corporation
-// Copyright (C) 2022 CVAT.ai Corporation
+// Copyright (C) 2022-2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
 import { connect } from 'react-redux';
-import { Task, TasksQuery, CombinedState } from 'reducers';
+import { TasksQuery, CombinedState } from 'reducers';
 import TasksPageComponent from 'components/tasks-page/tasks-page';
 
 interface StateToProps {
     fetching: boolean;
     query: TasksQuery;
     count: number;
-    countInvisible: number;
     importing: boolean;
 }
 
@@ -22,9 +21,6 @@ function mapStateToProps(state: CombinedState): StateToProps {
         fetching: state.tasks.fetching,
         query: tasks.gettingQuery,
         count: state.tasks.count,
-        countInvisible: tasks.hideEmpty ?
-            tasks.current.filter((task: Task): boolean => !task.instance.jobs.length).length :
-            0,
         importing: state.import.tasks.backup.importing,
     };
 }

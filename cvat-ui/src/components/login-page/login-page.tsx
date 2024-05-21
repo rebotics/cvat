@@ -1,84 +1,49 @@
 // Copyright (C) 2020-2022 Intel Corporation
-// Copyright (C) 2022 CVAT.ai Corp
+// Copyright (C) 2022-2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
 import React from 'react';
-import { RouteComponentProps } from 'react-router';
-import { Link, withRouter } from 'react-router-dom';
-import Title from 'antd/lib/typography/Title';
-import Text from 'antd/lib/typography/Text';
+import { RouteComponentProps, useHistory } from 'react-router';
+import { withRouter } from 'react-router-dom';
 import { Row, Col } from 'antd/lib/grid';
-import Layout from 'antd/lib/layout';
 
+import SigningLayout, { formSizes } from 'components/signing-common/signing-layout';
 import LoginForm, { LoginData } from './login-form';
 
 interface LoginPageComponentProps {
     fetching: boolean;
     renderResetPassword: boolean;
-    onLogin: (username: string, password: string) => void;
+    hasEmailVerificationBeenSent: boolean;
+    onLogin: (credential: string, password: string) => void;
 }
 
-const registrationEnabled = false;
-
 function LoginPageComponent(props: LoginPageComponentProps & RouteComponentProps): JSX.Element {
-    const sizes = {
-        style: {
-            width: 400,
-        },
-    };
+    const history = useHistory();
+    const {
+        fetching, renderResetPassword, hasEmailVerificationBeenSent, onLogin,
+    } = props;
 
-    const { Content } = Layout;
-
-    const { fetching, onLogin, renderResetPassword } = props;
-
-    let registrationLink;
-    if (registrationEnabled) {
-        registrationLink = (
-            <Text strong>
-                New to CVAT? Create
-                <Link to='/auth/register'> an account</Link>
-            </Text>
-        );
-    } else {
-        registrationLink = (
-            <Text strong>
-                Do not have an account? Ask your manager to create one for you.
-            </Text>
-        );
+    if (hasEmailVerificationBeenSent) {
+        history.push('/auth/email-verification-sent');
     }
 
     return (
-        <Layout>
-            <Content>
-                <Row style={{ height: '33%' }} />
-                <Row justify='center' align='middle'>
-                    <Col {...sizes}>
-                        <Title level={2}> Login </Title>
+        <SigningLayout>
+            <Col {...formSizes.wrapper}>
+                <Row justify='center'>
+                    <Col {...formSizes.form}>
                         <LoginForm
                             fetching={fetching}
+                            renderResetPassword={renderResetPassword}
                             onSubmit={(loginData: LoginData): void => {
-                                onLogin(loginData.username, loginData.password);
+                                onLogin(loginData.credential, loginData.password);
                             }}
                         />
-                        <Row justify='start' align='top'>
-                            <Col>
-                                {registrationLink}
-                            </Col>
-                        </Row>
-                        {renderResetPassword && (
-                            <Row justify='start' align='top'>
-                                <Col>
-                                    <Text strong>
-                                        <Link to='/auth/password/reset'>Forgot your password?</Link>
-                                    </Text>
-                                </Col>
-                            </Row>
-                        )}
                     </Col>
                 </Row>
-            </Content>
-        </Layout>
+            </Col>
+        </SigningLayout>
     );
 }
 

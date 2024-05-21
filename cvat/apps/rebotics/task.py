@@ -6,6 +6,7 @@ import django_rq
 from django.db import transaction
 from django.utils.timezone import now
 from django.contrib.auth import get_user_model
+from django.conf import settings
 
 from cvat.apps.engine import task as task_api
 from cvat.apps.engine.models import Project, Task, Data, Job, RemoteFile, \
@@ -15,10 +16,11 @@ from cvat.apps.engine.models import Project, Task, Data, Job, RemoteFile, \
 from cvat.apps.organizations.models import Organization
 from cvat.apps.engine.views import TaskViewSet
 from cvat.apps.engine.media_extractors import sort
-from cvat.apps.engine.log import slogger
-from cvat.rebotics.s3_client import s3_client
+from cvat.apps.engine.log import ServerLogManager
 
 from utils.dataset_manifest import S3ManifestManager
+
+slogger = ServerLogManager(__name__)
 
 User = get_user_model()
 
@@ -26,25 +28,23 @@ User = get_user_model()
 
 
 def _fix_coordinates(item, width, height):
-    if item['lowerx'] > item['upperx']:
-        item['lowerx'], item['upperx'] = item['upperx'], item['lowerx']
-    if item['lowery'] > item['uppery']:
-        item['lowery'], item['uppery'] = item['uppery'], item['lowery']
-    if item['lowerx'] < 0:
-        item['lowerx'] = 0
-    if item['upperx'] > width:
-        item['upperx'] = width
-    if item['lowery'] < 0:
-        item['lowery'] = 0
-    if item['uppery'] > height:
-        item['uppery'] = height
+    constraints = ('lowerx', 0, width), ('upperx', 0, width), ('lowery', 0, height), ('uppery', 0, height)
+    for key, min_value, max_value in constraints:
+        if item[key] < min_value:
+            item[key] = min_value
+        if item[key] > max_value:
+            item[key] = max_value
+    key_pairs = ('lowerx', 'upperx'), ('lowery', 'uppery')
+    for lower_key, upper_key in key_pairs:
+        if item[lower_key] > item[upper_key]:
+            item[lower_key], item[upper_key] = item[upper_key], item[lower_key]
 
 
 def _rand_color():
     choices = '0123456789ABCDEF'
     color = '#'
     for _ in range(6):
-        color += random.choice(choices)
+        color += random.choice(choices)  # nosec B311
     return color
 
 
@@ -291,7 +291,7 @@ def create(data: dict, retailer: User):
             'sorting_method': db_data.sorting_method,
         }
 
-        q = django_rq.get_queue('default')
+        q = django_rq.get_queue(settings.CVAT_QUEUES.IMPORT_DATA.value)
         q.enqueue_call(_create_thread, args=(task.pk, cvat_data),
                        job_id="/api/tasks/{}".format(task.pk))
 
@@ -312,8 +312,7 @@ def _get_task_data(task_id):
         task = Task.objects.get(pk=task_id)
     except Task.DoesNotExist:
         return None
-    preview_path = task.data.get_s3_preview_path()
-    preview_url = s3_client.get_presigned_url(preview_path)
+    preview_url = None  # preview is now obtained from cache
     s3_files = task.data.s3_files.all()
     images = [{'id': file.pk, 'image': file.file.url} for file in s3_files]
     return preview_url, images
@@ -321,7 +320,7 @@ def _get_task_data(task_id):
 
 def check(task_id):
     status = TaskViewSet._get_rq_response(
-        queue='default',
+        queue=settings.CVAT_QUEUES.IMPORT_DATA.value,
         job_id=f"/api/tasks/{task_id}",
     )
     response = {

@@ -18,7 +18,7 @@ If you make changes in this package, please do following:
 - Dependencies installation
 
 ```bash
-yarn ci --frozen-lockfile
+yarn install --frozen-lockfile
 ```
 
 - Building the module from sources in the `dist` directory:
@@ -26,12 +26,6 @@ yarn ci --frozen-lockfile
 ```bash
 yarn run build
 yarn run build --mode=development     # without a minification
-```
-
-- Building the documentation in the `docs` directory:
-
-```bash
-yarn run docs
 ```
 
 - Running of tests:

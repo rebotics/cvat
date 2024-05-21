@@ -37,15 +37,6 @@ Many UI elements have shortcut hints. Put your pointer to a required element to 
 |                            | _Image operations_                                                                                       |
 | `Ctrl+R`                   | Change image angle (add 90 degrees)                                                                      |
 | `Ctrl+Shift+R`             | Change image angle (subtract 90 degrees)                                                                 |
-| `Shift+B+=`                | Increase brightness level for the image                                                                  |
-| `Shift+B+-`                | Decrease brightness level for the image                                                                  |
-| `Shift+C+=`                | Increase contrast level for the image                                                                    |
-| `Shift+C+-`                | Decrease contrast level for the image                                                                    |
-| `Shift+S+=`                | Increase saturation level for the image                                                                  |
-| `Shift+S+-`                | Increase contrast level for the image                                                                    |
-| `Shift+G+=`                | Make the grid more visible                                                                               |
-| `Shift+G+-`                | Make the grid less visible                                                                               |
-| `Shift+G+Enter`            | Set another color for the image grid                                                                     |
 |                            | _Operations with objects_                                                                                |
 | `Ctrl`                     | Switch automatic bordering for polygons and polylines during drawing/editing                             |
 | Hold `Ctrl`                | When the shape is active and fix it                                                                      |
@@ -77,10 +68,10 @@ Many UI elements have shortcut hints. Put your pointer to a required element to 
 | `Shift+Tab`                | Go to the previous annotated object in current frame                                                     |
 | `<number>`                 | Assign a corresponding value to the current attribute                                                    |
 |                            | _Standard 3d mode_                                                                                       |
-| `Shift+arrrowup`           | Increases camera roll angle                                                                              |
-| `Shift+arrrowdown`         | Decreases camera roll angle                                                                              |
-| `Shift+arrrowleft`         | Decreases camera pitch angle                                                                             |
-| `Shift+arrrowright`        | Increases camera pitch angle                                                                             |
+| `Shift+Up Arrow`           | Increases camera roll angle                                                                              |
+| `Shift+Down Arrow`         | Decreases camera roll angle                                                                              |
+| `Shift+Left Arrow`         | Decreases camera pitch angle                                                                             |
+| `Shift+Right Arrow`        | Increases camera pitch angle                                                                             |
 | `Alt+O`                    | Move the camera up                                                                                       |
 | `Alt+U`                    | Move the camera down                                                                                     |
 | `Alt+J`                    | Move the camera left                                                                                     |

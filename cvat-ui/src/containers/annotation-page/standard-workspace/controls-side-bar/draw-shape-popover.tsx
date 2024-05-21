@@ -1,4 +1,5 @@
 // Copyright (C) 2020-2022 Intel Corporation
+// Copyright (C) 2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
@@ -9,6 +10,7 @@ import { RadioChangeEvent } from 'antd/lib/radio';
 import { CombinedState, ShapeType, ObjectType } from 'reducers';
 import { rememberObject } from 'actions/annotation-actions';
 import { Canvas, RectDrawingMethod, CuboidDrawingMethod } from 'cvat-canvas-wrapper';
+import { Canvas3d } from 'cvat-canvas3d-wrapper';
 import DrawShapePopoverComponent from 'components/annotation-page/standard-workspace/controls-side-bar/draw-shape-popover';
 import { Label } from 'cvat-core-wrapper';
 
@@ -29,7 +31,7 @@ interface DispatchToProps {
 
 interface StateToProps {
     normalizedKeyMap: Record<string, string>;
-    canvasInstance: Canvas;
+    canvasInstance: Canvas | Canvas3d;
     shapeType: ShapeType;
     labels: any[];
     jobInstance: any;
@@ -145,8 +147,12 @@ class DrawShapePopoverContainer extends React.PureComponent<Props, State> {
             });
 
             onDrawStart(
-                shapeType, selectedLabel.id, objectType,
-                numberOfPoints, rectDrawingMethod, cuboidDrawingMethod,
+                shapeType,
+                selectedLabel.id,
+                objectType,
+                numberOfPoints,
+                rectDrawingMethod,
+                cuboidDrawingMethod,
             );
         }
     }

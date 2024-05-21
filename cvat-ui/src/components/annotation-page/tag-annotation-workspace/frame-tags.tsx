@@ -11,10 +11,13 @@ import { ThunkDispatch } from 'redux-thunk';
 import {
     removeObject as removeObjectAction,
 } from 'actions/annotation-actions';
-import { CombinedState, ObjectType } from 'reducers';
+import { CombinedState, ObjectType, Workspace } from 'reducers';
+import { ObjectState } from 'cvat-core-wrapper';
+import { filterAnnotations } from 'utils/filter-annotations';
 
 interface StateToProps {
-    states: any[];
+    states: ObjectState[];
+    workspace: Workspace;
 }
 
 interface DispatchToProps {
@@ -25,36 +28,34 @@ function mapStateToProps(state: CombinedState): StateToProps {
     const {
         annotation: {
             annotations: { states },
+            workspace,
         },
     } = state;
 
-    return {
-        states,
-    };
+    return { states, workspace };
 }
 
 function mapDispatchToProps(dispatch: ThunkDispatch<CombinedState, {}, Action>): DispatchToProps {
     return {
-        removeObject(objectState: any): void {
+        removeObject(objectState: ObjectState): void {
             dispatch(removeObjectAction(objectState, false));
         },
     };
 }
 
 function FrameTags(props: StateToProps & DispatchToProps): JSX.Element {
-    const {
-        states,
-        removeObject,
-    } = props;
+    const { states, workspace, removeObject } = props;
 
-    const [frameTags, setFrameTags] = useState([] as any[]);
+    const [frameTags, setFrameTags] = useState([] as ObjectState[]);
 
-    const onRemoveState = (objectState: any): void => {
+    const onRemoveState = (objectState: ObjectState): void => {
         removeObject(objectState);
     };
 
     useEffect(() => {
-        setFrameTags(states.filter((objectState: any): boolean => objectState.objectType === ObjectType.TAG));
+        setFrameTags(
+            filterAnnotations(states, { workspace, include: [ObjectType.TAG] }),
+        );
     }, [states]);
 
     return (

@@ -1,9 +1,13 @@
 # Copyright (C) 2021-2022 Intel Corporation
+# Copyright (C) 2023 CVAT.ai Corporation
 #
 # SPDX-License-Identifier: MIT
 
+import os
+from tempfile import TemporaryDirectory
 import rq
 from typing import Any, Callable, List, Mapping, Tuple
+from datumaro.components.errors import DatasetError, DatasetImportError, DatasetNotFoundError
 
 from django.db import transaction
 
@@ -13,7 +17,7 @@ from cvat.apps.engine.task import _create_thread as create_task
 from cvat.apps.dataset_manager.task import TaskAnnotation
 
 from .annotation import AnnotationIR
-from .bindings import ProjectData, load_dataset_data
+from .bindings import ProjectData, load_dataset_data, CvatImportError
 from .formats.registry import make_exporter, make_importer
 
 def export_project(project_id, dst_file, format_name,
@@ -34,7 +38,7 @@ def export_project(project_id, dst_file, format_name,
 class ProjectAnnotationAndData:
     def __init__(self, pk: int):
         self.db_project = models.Project.objects.get(id=pk)
-        self.db_tasks = models.Task.objects.filter(project__id=pk).order_by('id')
+        self.db_tasks = models.Task.objects.filter(project__id=pk).exclude(data=None).order_by('id')
 
         self.task_annotations: dict[int, TaskAnnotation] = dict()
         self.annotation_irs: dict[int, AnnotationIR] = dict()
@@ -73,7 +77,7 @@ class ProjectAnnotationAndData:
 
         data_serializer = DataSerializer(data={
             "server_files": files['media'],
-            #TODO: followed fields whould be replaced with proper input values from request in future
+            #TODO: following fields should be replaced with proper input values from request in future
             "use_cache": False,
             "use_zip_chunks": True,
             "image_quality": 70,
@@ -94,7 +98,7 @@ class ProjectAnnotationAndData:
         data['server_files'] = list(map(split_name, data['server_files']))
 
         create_task(db_task, data, isDatasetImport=True)
-        self.db_tasks = models.Task.objects.filter(project__id=self.db_project.id).order_by('id')
+        self.db_tasks = models.Task.objects.filter(project__id=self.db_project.id).exclude(data=None).order_by('id')
         self.init_from_db()
         if project_data is not None:
             project_data.new_tasks.add(db_task.id)
@@ -127,12 +131,16 @@ class ProjectAnnotationAndData:
             db_project=self.db_project,
             host=host
         )
-        exporter(dst_file, project_data, **options)
+
+        temp_dir_base = self.db_project.get_tmp_dirname()
+        os.makedirs(temp_dir_base, exist_ok=True)
+        with TemporaryDirectory(dir=temp_dir_base) as temp_dir:
+            exporter(dst_file, temp_dir, project_data, **options)
 
     def load_dataset_data(self, *args, **kwargs):
         load_dataset_data(self, *args, **kwargs)
 
-    def import_dataset(self, dataset_file, importer):
+    def import_dataset(self, dataset_file, importer, **options):
         project_data = ProjectData(
             annotation_irs=self.annotation_irs,
             db_project=self.db_project,
@@ -141,7 +149,10 @@ class ProjectAnnotationAndData:
         )
         project_data.soft_attribute_import = True
 
-        importer(dataset_file, project_data, self.load_dataset_data)
+        temp_dir_base = self.db_project.get_tmp_dirname()
+        os.makedirs(temp_dir_base, exist_ok=True)
+        with TemporaryDirectory(dir=temp_dir_base) as temp_dir:
+            importer(dataset_file, temp_dir, project_data, self.load_dataset_data, **options)
 
         self.create({tid: ir.serialize() for tid, ir in self.annotation_irs.items() if tid in project_data.new_tasks})
 
@@ -150,7 +161,7 @@ class ProjectAnnotationAndData:
         raise NotImplementedError()
 
 @transaction.atomic
-def import_dataset_as_project(project_id, dataset_file, format_name):
+def import_dataset_as_project(src_file, project_id, format_name, conv_mask_to_poly):
     rq_job = rq.get_current_job()
     rq_job.meta['status'] = 'Dataset import has been started...'
     rq_job.meta['progress'] = 0.
@@ -160,5 +171,8 @@ def import_dataset_as_project(project_id, dataset_file, format_name):
     project.init_from_db()
 
     importer = make_importer(format_name)
-    with open(dataset_file, 'rb') as f:
-        project.import_dataset(f, importer)
+    with open(src_file, 'rb') as f:
+        try:
+            project.import_dataset(f, importer, conv_mask_to_poly=conv_mask_to_poly)
+        except (DatasetError, DatasetImportError, DatasetNotFoundError) as ex:
+            raise CvatImportError(str(ex))

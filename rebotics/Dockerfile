@@ -1,26 +1,32 @@
-FROM ubuntu:20.04 as build-image
+ARG PIP_VERSION=22.0.2
+ARG BASE_IMAGE=ubuntu:22.04
 
-ARG http_proxy
-ARG https_proxy
-ARG no_proxy="nuclio,${no_proxy}"
-ARG socks_proxy
-ARG DJANGO_CONFIGURATION="production"
+FROM ${BASE_IMAGE} as build-image-base
 
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get --no-install-recommends install -yq \
-        apache2-dev \
-        build-essential \
         curl \
+        g++ \
+        gcc \
+        git \
         libgeos-dev \
         libldap2-dev \
         libsasl2-dev \
+        make \
         nasm \
-        git \
         pkg-config \
         python3-dev \
         python3-pip \
-        python3-venv && \
-    rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/*
+
+ARG PIP_VERSION
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+RUN --mount=type=cache,target=/root/.cache/pip/http \
+    python3 -m pip install -U pip==${PIP_VERSION}
+
+# We build OpenH264, FFmpeg and PyAV in a separate build stage,
+# because this way Docker can do it in parallel to all the other packages.
+FROM build-image-base AS build-image-av
 
 # Compile Openh264 and FFmpeg
 ARG PREFIX=/opt/ffmpeg
@@ -30,43 +36,66 @@ ENV FFMPEG_VERSION=4.3.1 \
     OPENH264_VERSION=2.1.1
 
 WORKDIR /tmp/openh264
-RUN curl -sL https://github.com/cisco/openh264/archive/v${OPENH264_VERSION}.tar.gz --output openh264-${OPENH264_VERSION}.tar.gz && \
-    tar -zx --strip-components=1 -f openh264-${OPENH264_VERSION}.tar.gz && \
-    make -j5 && make install PREFIX=${PREFIX} && make clean
+RUN curl -sL https://github.com/cisco/openh264/archive/v${OPENH264_VERSION}.tar.gz --output - | \
+    tar -zx --strip-components=1 && \
+    make -j5 && make install-shared PREFIX=${PREFIX} && make clean
 
 WORKDIR /tmp/ffmpeg
-RUN curl -sL https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.bz2 --output - | \
-    tar -jx --strip-components=1 && \
-    ./configure --disable-nonfree --disable-gpl --enable-libopenh264 --enable-shared --disable-static --prefix="${PREFIX}" && \
-    # make clean keeps the configuration files that let to know how the original sources were used to create the binary
-    make -j5 && make install && make clean && \
-    tar -zcf "/tmp/ffmpeg-$FFMPEG_VERSION.tar.gz" . && mv "/tmp/ffmpeg-$FFMPEG_VERSION.tar.gz" .
+RUN curl -sL https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.gz --output - | \
+    tar -zx --strip-components=1 && \
+    ./configure --disable-nonfree --disable-gpl --enable-libopenh264 \
+        --enable-shared --disable-static --disable-doc --disable-programs --prefix="${PREFIX}" && \
+    make -j5 && make install && make clean
 
-# Install requirements
-RUN python3 -m venv /opt/venv
-ENV PATH="/opt/venv/bin:${PATH}"
-RUN python3 -m pip install --no-cache-dir -U pip==22.0.2 setuptools==60.6.0 wheel==0.37.1
-COPY cvat/requirements/ /tmp/requirements/
-RUN DATUMARO_HEADLESS=1 python3 -m pip install --no-cache-dir -r /tmp/requirements/${DJANGO_CONFIGURATION}.txt
+COPY utils/dataset_manifest/requirements.txt /tmp/utils/dataset_manifest/requirements.txt
 
-# Install rebotics requirements
-COPY rebotics/requirements.txt /tmp/requirements/rebotics.txt
-RUN python3 -m pip install --no-cache-dir -r /tmp/requirements/rebotics.txt
+# Since we're using pip-compile-multi, each dependency can only be listed in
+# one requirements file. In the case of PyAV, that should be
+# `dataset_manifest/requirements.txt`. Make sure it's actually there,
+# and then remove everything else.
+RUN grep -q '^av==' /tmp/utils/dataset_manifest/requirements.txt
+RUN sed -i '/^av==/!d' /tmp/utils/dataset_manifest/requirements.txt
 
-FROM node:16-slim AS cvat-ui
+# Work around https://github.com/PyAV-Org/PyAV/issues/1140
+RUN pip install setuptools wheel 'cython<3'
 
-ARG http_proxy
-ARG https_proxy
-ARG no_proxy
-ARG socks_proxy
-ARG PUBLIC_INSTANCE
+RUN --mount=type=cache,target=/root/.cache/pip/http \
+    python3 -m pip wheel --no-binary=av --no-build-isolation \
+    -r /tmp/utils/dataset_manifest/requirements.txt \
+    -w /tmp/wheelhouse
+
+# This stage builds wheels for all dependencies (except PyAV)
+FROM build-image-base AS build-image
+
+COPY cvat/requirements/ /tmp/cvat/requirements/
+COPY utils/dataset_manifest/requirements.txt /tmp/utils/dataset_manifest/requirements.txt
+COPY rebotics/requirements.txt /tmp/rebotics/requirements.txt
+
+# Exclude av from the requirements file
+RUN sed -i '/^av==/d' /tmp/utils/dataset_manifest/requirements.txt
+
+ARG CVAT_CONFIGURATION="production"
+
+RUN --mount=type=cache,target=/root/.cache/pip/http \
+    DATUMARO_HEADLESS=1 python3 -m pip wheel --no-deps \
+    -r /tmp/cvat/requirements/${CVAT_CONFIGURATION}.txt \
+    -r /tmp/rebotics/requirements.txt \
+    -w /tmp/wheelhouse
+
+FROM golang:1.20.5 AS build-smokescreen
+
+RUN git clone --depth=1 -b v0.0.4 https://github.com/stripe/smokescreen.git
+RUN cd smokescreen && go build -o /tmp/smokescreen
+
+FROM node:lts-slim AS cvat-ui
+
 ARG WA_PAGE_VIEW_HIT
+ARG UI_APP_CONFIG
+ARG CLIENT_PLUGINS
+ARG DISABLE_SOURCE_MAPS
+ARG SOURCE_MAPS_TOKEN
 
 ENV TERM=xterm \
-    http_proxy=${http_proxy}   \
-    https_proxy=${https_proxy} \
-    no_proxy=${no_proxy} \
-    socks_proxy=${socks_proxy} \
     LANG='C.UTF-8'  \
     LC_ALL='C.UTF-8'
 
@@ -81,7 +110,7 @@ COPY cvat-data/package.json /tmp/cvat-data/
 
 # Install common dependencies
 WORKDIR /tmp/
-RUN yarn install --ignore-scripts --frozen-lockfile
+RUN DISABLE_HUSKY=1 yarn --frozen-lockfile
 
 # Build source code
 COPY cvat-data/ /tmp/cvat-data/
@@ -89,9 +118,12 @@ COPY cvat-core/ /tmp/cvat-core/
 COPY cvat-canvas3d/ /tmp/cvat-canvas3d/
 COPY cvat-canvas/ /tmp/cvat-canvas/
 COPY cvat-ui/ /tmp/cvat-ui/
-RUN yarn run build:cvat-ui
+RUN CLIENT_PLUGINS="${CLIENT_PLUGINS}" \
+DISABLE_SOURCE_MAPS="${DISABLE_SOURCE_MAPS}" \
+UI_APP_CONFIG="${UI_APP_CONFIG}" \
+SOURCE_MAPS_TOKEN="${SOURCE_MAPS_TOKEN}" yarn run build:cvat-ui
 
-FROM ubuntu:20.04
+FROM ${BASE_IMAGE}
 
 ARG http_proxy
 ARG https_proxy
@@ -109,44 +141,41 @@ ENV TERM=xterm \
     TZ=${TZ}
 
 ARG USER="django"
-ARG DJANGO_CONFIGURATION="production"
-ENV DJANGO_CONFIGURATION=${DJANGO_CONFIGURATION}
+ARG CVAT_CONFIGURATION="production"
+ENV DJANGO_SETTINGS_MODULE="cvat.settings.${CVAT_CONFIGURATION}"
 
 # Install necessary apt packages
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get --no-install-recommends install -yq \
-        apache2 \
+        bzip2 \
         ca-certificates \
-        libapache2-mod-xsendfile \
-        libgeos-dev \
-        libgomp1 \
-        libgl1 \
-        supervisor \
-        libldap-2.4-2 \
-        libsasl2-2 \
-        libpython3-dev \
-        tzdata \
-        python3-distutils \
-        p7zip-full \
+        curl \
         git \
-        git-lfs \
+        libgeos-c1v5 \
+        libgl1 \
+        libgomp1 \
+        libldap-2.5-0 \
+        libpython3.10 \
+        libsasl2-2 \
+        nginx \
+        p7zip-full \
         poppler-utils \
-        ssh \
-        curl && \
-    ln -fs /usr/share/zoneinfo/${TZ} /etc/localtime && \
+        python3 \
+        python3-venv \
+        supervisor \
+        tzdata \
+    && ln -fs /usr/share/zoneinfo/${TZ} /etc/localtime && \
     dpkg-reconfigure -f noninteractive tzdata && \
     rm -rf /var/lib/apt/lists/* && \
     echo 'application/wasm wasm' >> /etc/mime.types
 
+# Install smokescreen
+COPY --from=build-smokescreen /tmp/smokescreen /usr/local/bin/smokescreen
+
 # Add a non-root user
 ENV USER=${USER}
 ENV HOME /home/${USER}
-RUN adduser --shell /bin/bash --disabled-password --gecos "" ${USER} && \
-    if [ -z ${socks_proxy} ]; then \
-        echo export "GIT_SSH_COMMAND=\"ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30\"" >> ${HOME}/.bashrc; \
-    else \
-        echo export "GIT_SSH_COMMAND=\"ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o ProxyCommand='nc -X 5 -x ${socks_proxy} %h %p'\"" >> ${HOME}/.bashrc; \
-    fi
+RUN adduser --shell /bin/bash --disabled-password --gecos "" ${USER}
 
 ARG CLAM_AV="no"
 RUN if [ "$CLAM_AV" = "yes" ]; then \
@@ -160,56 +189,61 @@ RUN if [ "$CLAM_AV" = "yes" ]; then \
         rm -rf /var/lib/apt/lists/*; \
     fi
 
-ARG INSTALL_SOURCES='no'
-WORKDIR ${HOME}/sources
-RUN if [ "$INSTALL_SOURCES" = "yes" ]; then \
-        sed -Ei 's/^# deb-src /deb-src /' /etc/apt/sources.list && \
-        apt-get update && \
-        dpkg --get-selections | while read -r line; do        \
-            package=$(echo "$line" | awk '{print $1}');       \
-            mkdir "$package";                                 \
-            (                                                 \
-                cd "$package";                                \
-                apt-get -q --download-only source "$package"; \
-            )                                                 \
-            done &&                                           \
-        rm -rf /var/lib/apt/lists/*;                          \
-    fi
-COPY --from=build-image /tmp/openh264/openh264*.tar.gz /tmp/ffmpeg/ffmpeg*.tar.gz ${HOME}/sources/
-
-# Copy python virtual environment and FFmpeg binaries from build-image
-COPY --from=build-image /opt/venv /opt/venv
+# Install wheels from the build image
+RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
+ARG PIP_VERSION
+ARG PIP_DISABLE_PIP_VERSION_CHECK=1
+
+RUN python -m pip install -U pip==${PIP_VERSION}
+RUN --mount=type=bind,from=build-image,source=/tmp/wheelhouse,target=/mnt/wheelhouse \
+    --mount=type=bind,from=build-image-av,source=/tmp/wheelhouse,target=/mnt/wheelhouse-av \
+    python -m pip install --no-index /mnt/wheelhouse/*.whl /mnt/wheelhouse-av/*.whl
+
 ENV NUMPROCS=1
-COPY --from=build-image /opt/ffmpeg /usr
+COPY --from=build-image-av /opt/ffmpeg/lib /usr/lib
+
+# These variables are required for supervisord substitutions in files
+# This library allows remote python debugging with VS Code
+ARG CVAT_DEBUG_ENABLED
+RUN if [ "${CVAT_DEBUG_ENABLED}" = 'yes' ]; then \
+        python3 -m pip install --no-cache-dir debugpy; \
+    fi
 
 # Install and initialize CVAT, copy all necessary files
+COPY cvat/nginx.conf /etc/nginx/nginx.conf
 COPY --chown=${USER} components /tmp/components
 COPY --chown=${USER} supervisord/ ${HOME}/supervisord
-COPY --chown=${USER} ssh ${HOME}/.ssh
-COPY --chown=${USER} mod_wsgi.conf wait-for-it.sh manage.py ${HOME}/
+COPY --chown=${USER} wait-for-it.sh manage.py backend_entrypoint.sh wait_for_deps.sh ${HOME}/
 COPY --chown=${USER} utils/ ${HOME}/utils
 COPY --chown=${USER} cvat/ ${HOME}/cvat
+COPY --chown=${USER} rqscheduler.py ${HOME}
 
 # Install UI
 COPY --from=cvat-ui --chown=${USER} /tmp/cvat-ui/dist ${HOME}/static-ui
 RUN sed -i -E "s#(<\!doctype html>)#{% load static %}\1#g" ${HOME}/static-ui/index.html && \
-    sed -i -E "s#\"/(assets/.*)\"#\"{% static \"\1\" %}\"#g" ${HOME}/static-ui/index.html && \
+    perl -pe "s#\"/(assets/.*?)\"#\"{% static \"\1\" %}\"#g" -i ${HOME}/static-ui/index.html && \
     mkdir -p ${HOME}/cvat/apps/rebotics/templates && \
     mv ${HOME}/static-ui/index.html ${HOME}/cvat/apps/rebotics/templates
 
-# Override supervisor
+# Override supervisor / nginx configs and some scripts
 COPY --chown=${USER} rebotics/supervisord.conf ${HOME}/supervisord/all.conf
+COPY --chown=${USER} rebotics/backend_entrypoint.sh rebotics/wait_for_deps.sh ${HOME}/
+COPY rebotics/nginx.conf /etc/nginx/nginx.conf
 
 # Add version file
 COPY --chown=${USER} VERSION ${HOME}/static-ui/version.txt
+
+ARG COVERAGE_PROCESS_START
+RUN if [ "${COVERAGE_PROCESS_START}" ]; then \
+        echo "import coverage; coverage.process_startup()" > /opt/venv/lib/python3.10/site-packages/coverage_subprocess.pth; \
+    fi
 
 # RUN all commands below as 'django' user
 USER ${USER}
 WORKDIR ${HOME}
 
-RUN mkdir data share media keys logs /tmp/supervisord
+RUN mkdir -p data share keys logs /tmp/supervisord static
 
 EXPOSE 8080
-ENTRYPOINT ["/usr/bin/supervisord"]
-CMD ["-c", "supervisord/all.conf"]
+ENTRYPOINT ["./backend_entrypoint.sh"]

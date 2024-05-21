@@ -1,11 +1,15 @@
 // Copyright (C) 2020-2022 Intel Corporation
+// Copyright (C) 2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
 import thunk from 'redux-thunk';
-import { createStore, applyMiddleware, Store, Reducer } from 'redux';
+import {
+    createStore, applyMiddleware, Store, Reducer,
+} from 'redux';
 import { createLogger } from 'redux-logger';
-import { isDev } from 'utils/enviroment';
+import { isDev } from 'utils/environment';
+import { CombinedState } from 'reducers';
 
 const logger = createLogger({
     predicate: isDev,
@@ -27,9 +31,18 @@ export default function createCVATStore(createRootReducer: () => Reducer): void 
     }
 
     store = createStore(createRootReducer(), appliedMiddlewares);
+    store.subscribe(() => {
+        const state = (store as Store).getState() as CombinedState;
+        for (const plugin of Object.values(state.plugins.current)) {
+            const { globalStateDidUpdate } = plugin;
+            if (globalStateDidUpdate) {
+                globalStateDidUpdate(state);
+            }
+        }
+    });
 }
 
-export function getCVATStore(): Store {
+export function getCVATStore(): Store<CombinedState> {
     if (store) {
         return store;
     }

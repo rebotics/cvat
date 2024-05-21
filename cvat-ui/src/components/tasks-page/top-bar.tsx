@@ -16,11 +16,13 @@ import { importActions } from 'actions/import-actions';
 import { SortingComponent, ResourceFilterHOC, defaultVisibility } from 'components/resource-sorting-filtering';
 import { TasksQuery } from 'reducers';
 import { usePrevious } from 'utils/hooks';
-import { MutliPlusIcon } from 'icons';
+import { MultiPlusIcon } from 'icons';
 import CvatDropdownMenuPaper from 'components/common/cvat-dropdown-menu-paper';
 import {
     localStorageRecentKeyword, localStorageRecentCapacity, predefinedFilterValues, config,
 } from './tasks-filter-configuration';
+
+import dimensions from '../projects-page/dimensions';
 
 const FilteringComponent = ResourceFilterHOC(
     config, localStorageRecentKeyword, localStorageRecentCapacity, predefinedFilterValues,
@@ -51,7 +53,7 @@ export default function TopBarComponent(props: VisibleTopBarProps): JSX.Element 
 
     return (
         <Row className='cvat-tasks-page-top-bar' justify='center' align='middle'>
-            <Col md={22} lg={18} xl={16} xxl={14}>
+            <Col {...dimensions}>
                 <div className='cvat-tasks-page-filters-wrapper'>
                     <Input.Search
                         enterButton
@@ -107,7 +109,7 @@ export default function TopBarComponent(props: VisibleTopBarProps): JSX.Element 
                                     className='cvat-create-multi-tasks-button'
                                     type='primary'
                                     onClick={(): void => history.push('/tasks/create?many=true')}
-                                    icon={<span className='anticon'><MutliPlusIcon /></span>}
+                                    icon={<span className='anticon'><MultiPlusIcon /></span>}
                                 >
                                     Create multi tasks
                                 </Button>

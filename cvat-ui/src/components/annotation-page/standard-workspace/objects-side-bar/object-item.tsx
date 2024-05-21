@@ -1,4 +1,5 @@
 // Copyright (C) 2021-2022 Intel Corporation
+// Copyright (C) 2022-2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
@@ -9,7 +10,6 @@ import Collapse from 'antd/lib/collapse';
 import ObjectButtonsContainer from 'containers/annotation-page/standard-workspace/objects-side-bar/object-buttons';
 import ItemDetailsContainer from 'containers/annotation-page/standard-workspace/objects-side-bar/object-item-details';
 import { ObjectType, ShapeType, ColorBy } from 'reducers';
-import { ObjectState } from 'cvat-core-wrapper';
 import ObjectItemElementComponent from './object-item-element';
 import ItemBasics from './object-item-basics';
 
@@ -20,10 +20,11 @@ interface Props {
     objectType: ObjectType;
     shapeType: ShapeType;
     clientID: number;
-    serverID: number | undefined;
+    serverID: number | null;
     labelID: number;
+    isGroundTruth: boolean;
     locked: boolean;
-    elements: any[];
+    elements: number[];
     color: string;
     colorBy: ColorBy;
     labels: any[];
@@ -40,6 +41,8 @@ interface Props {
     changeLabel(label: any): void;
     changeColor(color: string): void;
     resetCuboidPerspective(): void;
+    edit(): void;
+    slice(): void;
 }
 
 function ObjectItemComponent(props: Props): JSX.Element {
@@ -58,6 +61,7 @@ function ObjectItemComponent(props: Props): JSX.Element {
         attributes,
         labels,
         normalizedKeyMap,
+        isGroundTruth,
         activate,
         copy,
         propagate,
@@ -69,6 +73,8 @@ function ObjectItemComponent(props: Props): JSX.Element {
         changeLabel,
         changeColor,
         resetCuboidPerspective,
+        edit,
+        slice,
         jobInstance,
     } = props;
 
@@ -107,6 +113,7 @@ function ObjectItemComponent(props: Props): JSX.Element {
                     colorBy={colorBy}
                     type={type}
                     locked={locked}
+                    isGroundTruth={isGroundTruth}
                     copyShortcut={normalizedKeyMap.COPY_SHAPE}
                     pasteShortcut={normalizedKeyMap.PASTE_SHAPE}
                     propagateShortcut={normalizedKeyMap.PROPAGATE_OBJECT}
@@ -114,6 +121,7 @@ function ObjectItemComponent(props: Props): JSX.Element {
                     toForegroundShortcut={normalizedKeyMap.TO_FOREGROUND}
                     removeShortcut={normalizedKeyMap.DELETE_OBJECT}
                     changeColorShortcut={normalizedKeyMap.CHANGE_OBJECT_COLOR}
+                    sliceShortcut={normalizedKeyMap.SWITCH_SLICE_MODE}
                     changeLabel={changeLabel}
                     changeColor={changeColor}
                     copy={copy}
@@ -124,6 +132,8 @@ function ObjectItemComponent(props: Props): JSX.Element {
                     toBackground={toBackground}
                     toForeground={toForeground}
                     resetCuboidPerspective={resetCuboidPerspective}
+                    edit={edit}
+                    slice={slice}
                 />
                 <ObjectButtonsContainer readonly={readonly} clientID={clientID} />
                 {!!attributes.length && (
@@ -134,29 +144,27 @@ function ObjectItemComponent(props: Props): JSX.Element {
                     />
                 )}
                 {!!elements.length && (
-                    <>
-                        <Collapse className='cvat-objects-sidebar-state-item-elements-collapse'>
-                            <Collapse.Panel
-                                header={(
-                                    <>
-                                        <Text style={{ fontSize: 10 }} type='secondary'>PARTS</Text>
-                                        <br />
-                                    </>
-                                )}
-                                key='elements'
-                            >
-                                {elements.map((element: ObjectState) => (
-                                    <ObjectItemElementComponent
-                                        key={element.clientID as number}
-                                        readonly={readonly}
-                                        parentID={clientID}
-                                        clientID={element.clientID as number}
-                                        onMouseLeave={activateState}
-                                    />
-                                ))}
-                            </Collapse.Panel>
-                        </Collapse>
-                    </>
+                    <Collapse className='cvat-objects-sidebar-state-item-elements-collapse'>
+                        <Collapse.Panel
+                            header={(
+                                <>
+                                    <Text style={{ fontSize: 10 }} type='secondary'>PARTS</Text>
+                                    <br />
+                                </>
+                            )}
+                            key='elements'
+                        >
+                            {elements.map((element: number) => (
+                                <ObjectItemElementComponent
+                                    key={element}
+                                    readonly={readonly}
+                                    parentID={clientID}
+                                    clientID={element}
+                                    onMouseLeave={activateState}
+                                />
+                            ))}
+                        </Collapse.Panel>
+                    </Collapse>
                 )}
             </div>
         </div>

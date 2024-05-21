@@ -1,4 +1,5 @@
 // Copyright (C) 2019-2022 Intel Corporation
+// Copyright (C) 2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
@@ -80,8 +81,8 @@ export class MergeHandlerImpl implements MergeHandler {
     }
 
     public constructor(
-        onMergeDone: (objects: any[] | null, duration?: number) => void,
-        onFindObject: (event: MouseEvent) => void,
+        onMergeDone: MergeHandlerImpl['onMergeDone'],
+        onFindObject: MergeHandlerImpl['onFindObject'],
         canvas: SVG.Container,
     ) {
         this.onMergeDone = onMergeDone;
@@ -103,6 +104,10 @@ export class MergeHandlerImpl implements MergeHandler {
     }
 
     public select(objectState: any): void {
+        if (objectState.shapeType === 'mask') {
+            // masks can not be merged
+            return;
+        }
         const stateIndexes = this.statesToBeMerged.map((state): number => state.clientID);
         const stateFrames = this.statesToBeMerged.map((state): number => state.frame);
         const includes = stateIndexes.indexOf(objectState.clientID);

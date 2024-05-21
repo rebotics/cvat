@@ -1,4 +1,5 @@
 // Copyright (C) 2020-2022 Intel Corporation
+// Copyright (C) 2022-2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
@@ -8,34 +9,103 @@ import { withRouter } from 'react-router-dom';
 import Text from 'antd/lib/typography/Text';
 import { Row, Col } from 'antd/lib/grid';
 import Button from 'antd/lib/button';
-import { MoreOutlined } from '@ant-design/icons';
+import { LoadingOutlined, MoreOutlined } from '@ant-design/icons';
 import { grey } from '@ant-design/colors';
 import Dropdown from 'antd/lib/dropdown';
 import Progress from 'antd/lib/progress';
+import Badge from 'antd/lib/badge';
 import moment from 'moment';
 
+import { Task, RQStatus } from 'cvat-core-wrapper';
 import ActionsMenuContainer from 'containers/actions-menu/actions-menu';
-import { ActiveInference } from 'reducers';
+import Preview from 'components/common/preview';
+import { ActiveInference, PluginComponent } from 'reducers';
 import { Priority, PriorityColors } from 'enums';
 import AutomaticAnnotationProgress from './automatic-annotation-progress';
 
 export interface TaskItemProps {
     taskInstance: any;
-    previewImage: string;
     deleted: boolean;
-    hidden: boolean;
     activeInference: ActiveInference | null;
+    ribbonPlugins: PluginComponent[];
     cancelAutoAnnotation(): void;
+    updateTaskInState(task: Task): void;
 }
 
-class TaskItemComponent extends React.PureComponent<TaskItemProps & RouteComponentProps> {
+interface State {
+    importingState: {
+        state: RQStatus | null;
+        message: string;
+        progress: number;
+    } | null;
+}
+
+class TaskItemComponent extends React.PureComponent<TaskItemProps & RouteComponentProps, State> {
+    #isUnmounted: boolean;
+
+    constructor(props: TaskItemProps & RouteComponentProps) {
+        super(props);
+        const { taskInstance } = props;
+        this.#isUnmounted = false;
+        this.state = {
+            importingState: taskInstance.size > 0 ? null : {
+                state: null,
+                message: 'Request current progress',
+                progress: 0,
+            },
+        };
+    }
+
+    public componentDidMount(): void {
+        const { taskInstance, updateTaskInState } = this.props;
+        const { importingState } = this.state;
+
+        if (importingState !== null) {
+            taskInstance.listenToCreate((state: RQStatus, progress: number, message: string) => {
+                if (!this.#isUnmounted) {
+                    this.setState({
+                        importingState: {
+                            message,
+                            progress: Math.floor(progress * 100),
+                            state,
+                        },
+                    });
+                }
+            }).then((createdTask: Task) => {
+                if (!this.#isUnmounted) {
+                    this.setState({ importingState: null });
+
+                    setTimeout(() => {
+                        if (!this.#isUnmounted) {
+                            // check again, because the component may be unmounted to this moment
+                            const { taskInstance: currentTaskInstance } = this.props;
+                            if (currentTaskInstance.size !== createdTask.size) {
+                                // update state only if it was not updated anywhere else
+                                // for example in createTaskAsync
+                                updateTaskInState(createdTask);
+                            }
+                        }
+                    }, 1000);
+                }
+            });
+        }
+    }
+
+    public componentWillUnmount(): void {
+        this.#isUnmounted = true;
+    }
+
     private renderPreview(): JSX.Element {
-        const { previewImage } = this.props;
+        const { taskInstance } = this.props;
         return (
             <Col span={4}>
-                <div className='cvat-task-item-preview-wrapper'>
-                    <img alt='Preview' className='cvat-task-item-preview' src={previewImage} />
-                </div>
+                <Preview
+                    task={taskInstance}
+                    loadingClassName='cvat-task-item-loading-preview'
+                    emptyPreviewClassName='cvat-task-item-empty-preview'
+                    previewWrapperClassName='cvat-task-item-preview-wrapper'
+                    previewClassName='cvat-task-item-preview'
+                />
             </Col>
         );
     }
@@ -71,59 +141,82 @@ class TaskItemComponent extends React.PureComponent<TaskItemProps & RouteCompone
 
     private renderProgress(): JSX.Element {
         const { taskInstance, activeInference, cancelAutoAnnotation } = this.props;
-        // Count number of jobs and performed jobs
-        const numOfJobs = taskInstance.jobs.length;
-        const numOfCompleted = taskInstance.jobs.filter((job: any): boolean => job.stage === 'acceptance').length;
+        const { importingState } = this.state;
 
-        // Progress appearance depends on number of jobs
-        let progressColor = null;
-        let progressText = null;
-        if (numOfCompleted && numOfCompleted === numOfJobs) {
-            progressColor = 'cvat-task-completed-progress';
-            progressText = (
-                <Text strong className={progressColor}>
-                    Completed
-                </Text>
-            );
-        } else if (numOfCompleted) {
-            progressColor = 'cvat-task-progress-progress';
-            progressText = (
-                <Text strong className={progressColor}>
-                    In Progress
-                </Text>
-            );
-        } else {
-            progressColor = 'cvat-task-pending-progress';
-            progressText = (
-                <Text strong className={progressColor}>
-                    Pending
-                </Text>
+        if (importingState) {
+            let textType: 'success' | 'danger' = 'success';
+            if (!!importingState.state && [RQStatus.FAILED, RQStatus.UNKNOWN].includes(importingState.state)) {
+                textType = 'danger';
+            }
+
+            return (
+                <Col span={7}>
+                    <Row>
+                        <Col span={24} className='cvat-task-item-progress-wrapper'>
+                            <div>
+                                <Text
+                                    strong
+                                    type={[RQStatus.QUEUED, null].includes(importingState.state) ? undefined : textType}
+                                >
+                                    {`\u2022 ${importingState.message || importingState.state}`}
+                                    { !!importingState.state && [RQStatus.QUEUED, RQStatus.STARTED]
+                                        .includes(importingState.state) && <LoadingOutlined /> }
+                                </Text>
+                            </div>
+                            <Progress
+                                percent={importingState.progress}
+                                strokeColor='#1890FF'
+                                strokeWidth={5}
+                                size='small'
+                            />
+                        </Col>
+                    </Row>
+                </Col>
             );
         }
+        // Count number of jobs and performed jobs
+        const numOfJobs = taskInstance.progress.totalJobs;
+        const numOfCompleted = taskInstance.progress.completedJobs;
+        const numOfValidation = taskInstance.progress.validationJobs;
+        const numOfAnnotation = taskInstance.progress.annotationJobs;
 
-        const jobsProgress = numOfCompleted / numOfJobs;
+        // Progress appearance depends on number of jobs
+        const jobsProgress = ((numOfCompleted + numOfValidation) * 100) / numOfJobs;
 
         const priorityText = Priority[taskInstance.priority] || 'None';
         const priorityColor = PriorityColors.get(taskInstance.priority) || grey.primary;
 
         return (
-            <Col span={6}>
-                <Row justify='space-between' align='top'>
-                    <Col>
-                        <svg height='8' width='8' className={progressColor}>
-                            <circle cx='4' cy='4' r='4' strokeWidth='0' />
-                        </svg>
-                        {progressText}
-                    </Col>
-                    <Col>
-                        <Text type='secondary'>{`${numOfCompleted} of ${numOfJobs} jobs`}</Text>
-                    </Col>
-                </Row>
+            <Col span={7}>
                 <Row>
-                    <Col span={24}>
+                    <Col span={24} className='cvat-task-item-progress-wrapper'>
+                        <div>
+                            { numOfCompleted > 0 && (
+                                <Text strong className='cvat-task-completed-progress'>
+                                    {`\u2022 ${numOfCompleted} done `}
+                                </Text>
+                            )}
+
+                            { numOfValidation > 0 && (
+                                <Text strong className='cvat-task-validation-progress'>
+                                    {`\u2022 ${numOfValidation} on review `}
+                                </Text>
+                            )}
+
+                            { numOfAnnotation > 0 && (
+                                <Text strong className='cvat-task-annotation-progress'>
+                                    {`\u2022 ${numOfAnnotation} annotating `}
+                                </Text>
+                            )}
+                            <Text strong type='secondary'>
+                                {`\u2022 ${numOfJobs} total`}
+                            </Text>
+                        </div>
                         <Progress
-                            className={`${progressColor} cvat-task-progress`}
-                            percent={jobsProgress * 100}
+                            percent={jobsProgress}
+                            success={{
+                                percent: (numOfCompleted * 100) / numOfJobs,
+                            }}
                             strokeColor='#1890FF'
                             showInfo={false}
                             strokeWidth={5}
@@ -148,14 +241,20 @@ class TaskItemComponent extends React.PureComponent<TaskItemProps & RouteCompone
     }
 
     private renderNavigation(): JSX.Element {
+        const { importingState } = this.state;
         const { taskInstance, history } = this.props;
         const { id } = taskInstance;
 
+        const onViewAnalytics = (): void => {
+            history.push(`/tasks/${taskInstance.id}/analytics`);
+        };
+
         return (
-            <Col span={4}>
+            <Col span={3}>
                 <Row justify='end'>
                     <Col>
                         <Button
+                            disabled={!!importingState}
                             className='cvat-item-open-task-button'
                             type='primary'
                             size='large'
@@ -171,7 +270,15 @@ class TaskItemComponent extends React.PureComponent<TaskItemProps & RouteCompone
                     </Col>
                 </Row>
                 <Row justify='end'>
-                    <Dropdown overlay={<ActionsMenuContainer taskInstance={taskInstance} />}>
+                    <Dropdown
+                        destroyPopupOnHide
+                        overlay={(
+                            <ActionsMenuContainer
+                                taskInstance={taskInstance}
+                                onViewAnalytics={onViewAnalytics}
+                            />
+                        )}
+                    >
                         <Col className='cvat-item-open-task-actions'>
                             <Text className='cvat-text-color'>Actions</Text>
                             <MoreOutlined className='cvat-menu-icon' />
@@ -183,24 +290,39 @@ class TaskItemComponent extends React.PureComponent<TaskItemProps & RouteCompone
     }
 
     public render(): JSX.Element {
-        const { deleted, hidden } = this.props;
+        const { deleted, ribbonPlugins } = this.props;
+
         const style = {};
         if (deleted) {
             (style as any).pointerEvents = 'none';
             (style as any).opacity = 0.5;
         }
 
-        if (hidden) {
-            (style as any).display = 'none';
-        }
+        const ribbonItems = ribbonPlugins
+            .filter((plugin) => plugin.data.shouldBeRendered(this.props, this.state))
+            .map((plugin) => ({ component: plugin.component, weight: plugin.data.weight }));
 
         return (
-            <Row className='cvat-tasks-list-item' justify='center' align='top' style={{ ...style }}>
-                {this.renderPreview()}
-                {this.renderDescription()}
-                {this.renderProgress()}
-                {this.renderNavigation()}
-            </Row>
+            <Badge.Ribbon
+                style={{ visibility: ribbonItems.length ? 'visible' : 'hidden' }}
+                className='cvat-task-item-ribbon'
+                placement='start'
+                text={(
+                    <div>
+                        {ribbonItems.sort((item1, item2) => item1.weight - item2.weight)
+                            .map((item) => item.component).map((Component, index) => (
+                                <Component key={index} targetProps={this.props} targetState={this.state} />
+                            ))}
+                    </div>
+                )}
+            >
+                <Row className='cvat-tasks-list-item' justify='center' align='top' style={{ ...style }}>
+                    {this.renderPreview()}
+                    {this.renderDescription()}
+                    {this.renderProgress()}
+                    {this.renderNavigation()}
+                </Row>
+            </Badge.Ribbon>
         );
     }
 }

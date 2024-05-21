@@ -1,5 +1,5 @@
 // Copyright (C) 2021-2022 Intel Corporation
-// Copyright (C) 2022 CVAT.ai Corporation
+// Copyright (C) 2022-2023 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
@@ -49,6 +49,7 @@ const initialValues: FormValues = {
 
 interface UploadParams {
     resource: 'annotation' | 'dataset';
+    convMaskToPoly: boolean;
     useDefaultSettings: boolean;
     sourceStorage: Storage;
     selectedFormat: string | null;
@@ -75,6 +76,7 @@ function ImportDatasetModal(props: StateToProps): JSX.Element {
     const [helpMessage, setHelpMessage] = useState('');
     const [selectedSourceStorageLocation, setSelectedSourceStorageLocation] = useState(StorageLocation.LOCAL);
     const [uploadParams, setUploadParams] = useState<UploadParams>({
+        convMaskToPoly: true,
         useDefaultSettings: true,
     } as UploadParams);
     const [resource, setResource] = useState('');
@@ -88,7 +90,6 @@ function ImportDatasetModal(props: StateToProps): JSX.Element {
     }, [instanceT]);
 
     const isDataset = useCallback((): boolean => resource === 'dataset', [resource]);
-
     const isAnnotation = useCallback((): boolean => resource === 'annotation', [resource]);
 
     useEffect(() => {
@@ -102,35 +103,21 @@ function ImportDatasetModal(props: StateToProps): JSX.Element {
         } as UploadParams);
     }, [resource, defaultStorageLocation, defaultStorageCloudId]);
 
+    const isProject = useCallback((): boolean => instance instanceof core.classes.Project, [instance]);
+    const isTask = useCallback((): boolean => instance instanceof core.classes.Task, [instance]);
+
     useEffect(() => {
         if (instance) {
-            if (instance instanceof core.classes.Project || instance instanceof core.classes.Task) {
-                setDefaultStorageLocation(instance.sourceStorage?.location || StorageLocation.LOCAL);
-                setDefaultStorageCloudId(instance.sourceStorage?.cloudStorageId || null);
-                if (instance instanceof core.classes.Project) {
-                    setInstanceType(`project #${instance.id}`);
-                } else {
-                    setInstanceType(`task #${instance.id}`);
-                }
-            } else if (instance instanceof core.classes.Job) {
-                core.tasks.get({ id: instance.taskId })
-                    .then((response: any) => {
-                        if (response.length) {
-                            const [taskInstance] = response;
-                            setDefaultStorageLocation(taskInstance.sourceStorage?.location || StorageLocation.LOCAL);
-                            setDefaultStorageCloudId(taskInstance.sourceStorage?.cloudStorageId || null);
-                        }
-                    })
-                    .catch((error: Error) => {
-                        if ((error as any).code !== 403) {
-                            Notification.error({
-                                message: `Could not get task instance ${instance.taskId}`,
-                                description: error.toString(),
-                            });
-                        }
-                    });
-                setInstanceType(`job #${instance.id}`);
+            setDefaultStorageLocation(instance.sourceStorage.location);
+            setDefaultStorageCloudId(instance.sourceStorage.cloudStorageId);
+            let type: 'project' | 'task' | 'job' = 'job';
+
+            if (isProject()) {
+                type = 'project';
+            } else if (isTask()) {
+                type = 'task';
             }
+            setInstanceType(`${type} #${instance.id}`);
         }
     }, [instance, resource]);
 
@@ -143,39 +130,50 @@ function ImportDatasetModal(props: StateToProps): JSX.Element {
     }, [defaultStorageLocation, defaultStorageCloudId]);
 
     const uploadLocalFile = (): JSX.Element => (
-        <Upload.Dragger
-            listType='text'
-            fileList={file ? [file] : ([] as any[])}
-            accept='.zip,.json,.xml'
-            beforeUpload={(_file: RcFile): boolean => {
-                if (!selectedLoader) {
-                    message.warn('Please select a format first', 3);
-                } else if (isDataset() && !['application/zip', 'application/x-zip-compressed'].includes(_file.type)) {
-                    message.error('Only ZIP archive is supported for import a dataset');
-                } else if (isAnnotation() &&
-                            !selectedLoader.format.toLowerCase().split(', ').includes(_file.name.split('.')[_file.name.split('.').length - 1])) {
-                    message.error(
-                        `For ${selectedLoader.name} format only files with ` +
-                            `${selectedLoader.format.toLowerCase()} extension can be used`,
-                    );
-                } else {
-                    setFile(_file);
-                    setUploadParams({
-                        ...uploadParams,
-                        file: _file,
-                    } as UploadParams);
+        <Form.Item
+            getValueFromEvent={(e) => {
+                if (Array.isArray(e)) {
+                    return e;
                 }
-                return false;
+                return e?.fileList[0];
             }}
-            onRemove={() => {
-                setFile(null);
-            }}
+            name='dragger'
+            rules={[{ required: true, message: 'The file is required' }]}
         >
-            <p className='ant-upload-drag-icon'>
-                <InboxOutlined />
-            </p>
-            <p className='ant-upload-text'>Click or drag file to this area</p>
-        </Upload.Dragger>
+            <Upload.Dragger
+                listType='text'
+                fileList={file ? [file] : ([] as any[])}
+                accept='.zip,.json,.xml'
+                beforeUpload={(_file: RcFile): boolean => {
+                    if (!selectedLoader) {
+                        message.warn('Please select a format first', 3);
+                    } else if (isDataset() && !['application/zip', 'application/x-zip-compressed'].includes(_file.type)) {
+                        message.error('Only ZIP archive is supported for import a dataset');
+                    } else if (isAnnotation() &&
+                                !selectedLoader.format.toLowerCase().split(', ').includes(_file.name.split('.')[_file.name.split('.').length - 1])) {
+                        message.error(
+                            `For ${selectedLoader.name} format only files with ` +
+                                `${selectedLoader.format.toLowerCase()} extension can be used`,
+                        );
+                    } else {
+                        setFile(_file);
+                        setUploadParams({
+                            ...uploadParams,
+                            file: _file,
+                        } as UploadParams);
+                    }
+                    return false;
+                }}
+                onRemove={() => {
+                    setFile(null);
+                }}
+            >
+                <p className='ant-upload-drag-icon'>
+                    <InboxOutlined />
+                </p>
+                <p className='ant-upload-text'>Click or drag file to this area</p>
+            </Upload.Dragger>
+        </Form.Item>
     );
 
     const validateFileName = (_: RuleObject, value: string): Promise<void> => {
@@ -210,19 +208,17 @@ function ImportDatasetModal(props: StateToProps): JSX.Element {
             name='fileName'
             hasFeedback
             dependencies={['selectedFormat']}
-            rules={[{ validator: validateFileName }]}
+            rules={[{ validator: validateFileName }, { required: true, message: 'Please, specify a name' }]}
             required
         >
             <Input
                 placeholder='Dataset file name'
                 className='cvat-modal-import-filename-input'
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                    if (e.target.value) {
-                        setUploadParams({
-                            ...uploadParams,
-                            fileName: e.target.value,
-                        } as UploadParams);
-                    }
+                    setUploadParams({
+                        ...uploadParams,
+                        fileName: e.target.value || '',
+                    } as UploadParams);
                 }}
             />
         </Form.Item>
@@ -238,11 +234,15 @@ function ImportDatasetModal(props: StateToProps): JSX.Element {
 
     const onUpload = (): void => {
         if (uploadParams && uploadParams.resource) {
-            dispatch(importDatasetAsync(
-                instance, uploadParams.selectedFormat as string,
-                uploadParams.useDefaultSettings, uploadParams.sourceStorage,
-                uploadParams.file || uploadParams.fileName as string,
-            ));
+            dispatch(
+                importDatasetAsync(
+                    instance,
+                    uploadParams.selectedFormat as string,
+                    uploadParams.useDefaultSettings,
+                    uploadParams.sourceStorage,
+                    uploadParams.file || uploadParams.fileName as string,
+                    uploadParams.convMaskToPoly,
+                ));
             const resToPrint = uploadParams.resource.charAt(0).toUpperCase() + uploadParams.resource.slice(1);
             Notification.info({
                 message: `${resToPrint} import started`,
@@ -269,14 +269,7 @@ function ImportDatasetModal(props: StateToProps): JSX.Element {
     };
 
     const handleImport = useCallback(
-        (values: FormValues): void => {
-            if (uploadParams.file === null && !values.fileName) {
-                Notification.error({
-                    message: `No ${uploadParams.resource} file specified`,
-                });
-                return;
-            }
-
+        (): void => {
             if (isAnnotation()) {
                 confirmUpload();
             } else {
@@ -286,6 +279,11 @@ function ImportDatasetModal(props: StateToProps): JSX.Element {
         },
         [instance, uploadParams],
     );
+
+    const loadFromLocal = (useDefaultSettings && (
+        defaultStorageLocation === StorageLocation.LOCAL ||
+        defaultStorageLocation === null
+    )) || (!useDefaultSettings && selectedSourceStorageLocation === StorageLocation.LOCAL);
 
     return (
         <>
@@ -314,11 +312,15 @@ function ImportDatasetModal(props: StateToProps): JSX.Element {
                 onCancel={closeModal}
                 onOk={() => form.submit()}
                 className='cvat-modal-import-dataset'
+                destroyOnClose
             >
                 <Form
                     name={`Import ${resource}`}
                     form={form}
-                    initialValues={initialValues}
+                    initialValues={{
+                        ...initialValues,
+                        convMaskToPoly: uploadParams.convMaskToPoly,
+                    }}
                     onFinish={handleImport}
                     layout='vertical'
                 >
@@ -371,7 +373,27 @@ function ImportDatasetModal(props: StateToProps): JSX.Element {
                                 )}
                         </Select>
                     </Form.Item>
-                    <Space>
+                    <Space className='cvat-modal-import-switch-conv-mask-to-poly-container'>
+                        <Form.Item
+                            name='convMaskToPoly'
+                            valuePropName='checked'
+                            className='cvat-modal-import-switch-conv-mask-to-poly'
+                        >
+                            <Switch
+                                onChange={(value: boolean) => {
+                                    setUploadParams({
+                                        ...uploadParams,
+                                        convMaskToPoly: value,
+                                    } as UploadParams);
+                                }}
+                            />
+                        </Form.Item>
+                        <Text strong>Convert masks to polygons</Text>
+                        <CVATTooltip title='The option is relevant for formats that work with masks only'>
+                            <QuestionCircleOutlined />
+                        </CVATTooltip>
+                    </Space>
+                    <Space className='cvat-modal-import-switch-use-default-storage-container'>
                         <Form.Item
                             name='useDefaultSettings'
                             valuePropName='checked'
@@ -392,18 +414,6 @@ function ImportDatasetModal(props: StateToProps): JSX.Element {
                             <QuestionCircleOutlined />
                         </CVATTooltip>
                     </Space>
-
-                    {
-                        useDefaultSettings && (
-                            defaultStorageLocation === StorageLocation.LOCAL ||
-                            defaultStorageLocation === null
-                        ) && uploadLocalFile()
-                    }
-                    {
-                        useDefaultSettings &&
-                        defaultStorageLocation === StorageLocation.CLOUD_STORAGE &&
-                        renderCustomName()
-                    }
                     {!useDefaultSettings && (
                         <StorageField
                             locationName={['sourceStorage', 'location']}
@@ -421,16 +431,8 @@ function ImportDatasetModal(props: StateToProps): JSX.Element {
                             onChangeLocationValue={(value: StorageLocation) => setSelectedSourceStorageLocation(value)}
                         />
                     )}
-                    {
-                        !useDefaultSettings &&
-                        selectedSourceStorageLocation === StorageLocation.CLOUD_STORAGE &&
-                        renderCustomName()
-                    }
-                    {
-                        !useDefaultSettings &&
-                        selectedSourceStorageLocation === StorageLocation.LOCAL &&
-                        uploadLocalFile()
-                    }
+                    { !loadFromLocal && renderCustomName() }
+                    { loadFromLocal && uploadLocalFile() }
                 </Form>
             </Modal>
             <ImportDatasetStatusModal />

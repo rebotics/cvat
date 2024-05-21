@@ -1,35 +1,31 @@
 # Copyright (C) 2021-2022 Intel Corporation
+# Copyright (C) 2022-2023 CVAT.ai Corporation
 #
 # SPDX-License-Identifier: MIT
-import io
 
+from enum import Enum
+from io import StringIO
 import av
 import json
 import os
 
-from abc import ABC, abstractmethod
+from abc import ABC, abstractmethod, abstractproperty, abstractstaticmethod
 from contextlib import closing
-from tempfile import TemporaryFile, NamedTemporaryFile
 from PIL import Image
 from json.decoder import JSONDecodeError
+from io import BytesIO
 
+from .errors import InvalidManifestError, InvalidVideoFrameError
 from .utils import SortingMethod, md5_hash, rotate_image, sort
 
+from typing import Dict, List, Union, Optional
+
+from tempfile import NamedTemporaryFile
 from django.utils.text import get_valid_filename
-
-from cvat.rebotics.s3_client import s3_client
-from cvat.rebotics.utils import injected_property, StrEnum, ChoicesEnum
+from botocore.exceptions import ClientError
 from cvat.rebotics.cache import default_cache
-
-
-class ManifestType(StrEnum, ChoicesEnum):
-    IMAGES = 'images'
-    VIDEO = 'video'
-
-
-class ManifestVersion(StrEnum, ChoicesEnum):
-    V1 = '1.0'
-    V1_1 = '1.1'
+from cvat.rebotics.s3_client import s3_client
+from cvat.rebotics.utils import injected_property
 
 
 class VideoStreamReader:
@@ -41,14 +37,11 @@ class VideoStreamReader:
 
         with closing(av.open(self.source_path, mode='r')) as container:
             video_stream = VideoStreamReader._get_video_stream(container)
-            isBreaked = False
             for packet in container.demux(video_stream):
-                if isBreaked:
-                    break
                 for frame in packet.decode():
                     # check type of first frame
                     if not frame.pict_type.name == 'I':
-                        raise Exception('First frame is not key frame')
+                        raise InvalidVideoFrameError('First frame is not key frame')
 
                     # get video resolution
                     if video_stream.metadata.get('rotate'):
@@ -60,11 +53,8 @@ class VideoStreamReader:
                             format ='bgr24',
                         )
                     self.height, self.width = (frame.height, frame.width)
-                    # not all videos contain information about numbers of frames
-                    if video_stream.frames:
-                        self._frames_number = video_stream.frames
-                    isBreaked = True
-                    break
+
+                    return
 
     @property
     def source_path(self):
@@ -77,6 +67,9 @@ class VideoStreamReader:
         return video_stream
 
     def __len__(self):
+        assert self._frames_number is not None, \
+            "The length will not be available until the reader is iterated all the way through at least once"
+
         return self._frames_number
 
     @property
@@ -98,9 +91,9 @@ class VideoStreamReader:
             for packet in container.demux(video_stream):
                 for frame in packet.decode():
                     if None not in {frame.pts, frame_pts} and frame.pts <= frame_pts:
-                        raise Exception('Invalid pts sequences')
+                        raise InvalidVideoFrameError('Invalid pts sequences')
                     if None not in {frame.dts, frame_dts} and frame.dts <= frame_dts:
-                        raise Exception('Invalid dts sequences')
+                        raise InvalidVideoFrameError('Invalid dts sequences')
                     frame_pts, frame_dts = frame.pts, frame.dts
 
                     if frame.key_frame:
@@ -127,55 +120,20 @@ class VideoStreamReader:
             if not self._frames_number:
                 self._frames_number = index
 
-
-class KeyFramesVideoStreamReader(VideoStreamReader):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-    def __iter__(self):
-        with closing(av.open(self.source_path, mode='r')) as container:
-            video_stream = self._get_video_stream(container)
-            frame_pts, frame_dts = -1, -1
-            index, key_frame_number = 0, 0
-            for packet in container.demux(video_stream):
-                for frame in packet.decode():
-                    if None not in {frame.pts, frame_pts} and frame.pts <= frame_pts:
-                        raise Exception('Invalid pts sequences')
-                    if None not in {frame.dts, frame_dts} and frame.dts <= frame_dts:
-                        raise Exception('Invalid dts sequences')
-                    frame_pts, frame_dts = frame.pts, frame.dts
-
-                    if frame.key_frame:
-                        key_frame_number += 1
-                        ratio = (index + 1) // key_frame_number
-                        if ratio >= self._upper_bound and not self._force:
-                            raise AssertionError('Too few keyframes')
-                        key_frame = {
-                            'index': index,
-                            'pts': frame.pts,
-                            'md5': md5_hash(frame)
-                        }
-
-                        with closing(av.open(self.source_path, mode='r')) as checked_container:
-                            checked_container.seek(offset=key_frame['pts'], stream=video_stream)
-                            isValid = self.validate_key_frame(checked_container, video_stream, key_frame)
-                            if isValid:
-                                yield (index, key_frame['pts'], key_frame['md5'])
-                    index += 1
-
-
 class DatasetImagesReader:
     def __init__(self,
-                sources,
-                meta=None,
-                sorting_method=SortingMethod.PREDEFINED,
-                use_image_hash=False,
-                start = 0,
-                step = 1,
-                stop = None,
-                *args,
+                sources: Union[List[str], List[BytesIO]],
+                *,
+                start: int = 0,
+                step: int = 1,
+                stop: Optional[int] = None,
+                meta: Optional[Dict[str, List[str]]] = None,
+                sorting_method: SortingMethod =SortingMethod.PREDEFINED,
+                use_image_hash: bool = False,
                 **kwargs):
-        self._sources = sort(sources, sorting_method)
+        self._raw_data_used = not isinstance(sources[0], str)
+        func = (lambda x: x.filename) if self._raw_data_used else None
+        self._sources = sort(sources, sorting_method, func=func)
         self._meta = meta
         self._data_dir = kwargs.get('data_dir', None)
         self._use_image_hash = use_image_hash
@@ -213,23 +171,28 @@ class DatasetImagesReader:
             if idx in self.range_:
                 image = next(sources)
                 img = Image.open(image, mode='r')
-                orientation = img.getexif().get(274, 1)
+
                 img_name = os.path.relpath(image, self._data_dir) if self._data_dir \
-                    else os.path.basename(image)
+                    else os.path.basename(image) if not self._raw_data_used else image.filename
                 name, extension = os.path.splitext(img_name)
-                width, height = img.width, img.height
-                if orientation > 4:
-                    width, height = height, width
                 image_properties = {
                     'name': name.replace('\\', '/'),
                     'extension': extension,
-                    'width': width,
-                    'height': height,
                 }
+
+                width, height = img.width, img.height
+                orientation = img.getexif().get(274, 1)
+                if orientation > 4:
+                    width, height = height, width
+                image_properties['width'] = width
+                image_properties['height'] = height
+
                 if self._meta and img_name in self._meta:
                     image_properties['meta'] = self._meta[img_name]
+
                 if self._use_image_hash:
                     image_properties['checksum'] = md5_hash(img)
+
                 yield image_properties
             else:
                 yield dict()
@@ -240,7 +203,6 @@ class DatasetImagesReader:
 
     def __len__(self):
         return len(self.range_)
-
 
 class Dataset3DImagesReader(DatasetImagesReader):
     def __init__(self, **kwargs):
@@ -264,20 +226,26 @@ class Dataset3DImagesReader(DatasetImagesReader):
             else:
                 yield dict()
 
-
-@injected_property('TYPE', error_message='Manifest TYPE is not set. Please, use manager to initialize.')
 class _Manifest:
+    class SupportedVersion(str, Enum):
+        V1 = '1.0'
+        V1_1 = '1.1'
+
+        @classmethod
+        def choices(cls):
+            return (x.value for x in cls)
+
+        def __str__(self):
+            return self.value
+
     FILE_NAME = 'manifest.jsonl'
-    VALID_EXTENSION = '.jsonl'
-    VERSION = ManifestVersion.V1_1
+    VERSION = SupportedVersion.V1_1
+    TYPE: str  # must be set externally
 
     def __init__(self, path, upload_dir=None):
-        self._path = self._init_path(path)
-        self._upload_dir = upload_dir
-
-    def _init_path(self, path):
         assert path, 'A path to manifest file not found'
-        return os.path.join(path, self.FILE_NAME) if os.path.isdir(path) else path
+        self._path = os.path.join(path, self.FILE_NAME) if os.path.isdir(path) else path
+        self._upload_dir = upload_dir
 
     @property
     def path(self):
@@ -288,42 +256,22 @@ class _Manifest:
         return os.path.basename(self._path) if not self._upload_dir \
             else os.path.relpath(self._path, self._upload_dir)
 
-    def open_file(self, mode: str = 'r+'):
-        """Warning: you should close the file!"""
-        return open(self._path, mode=mode)
-
-
-class _S3Manifest(_Manifest):
-    def _init_path(self, path):
-        return path if path.endswith(self.VALID_EXTENSION) else os.path.join(path, self.FILE_NAME)
-
-    def open_file(self, mode: str = 'r+'):
-        """Warning: you should close the file!"""
-        content = default_cache.get(self._path)
-        if content is None:
-            with NamedTemporaryFile(delete=False) as f:
-                s3_client.download_to_io(self._path, f)
-                path = f.name
-            with open(path, 'r+') as f:
-                content = f.read()
-            default_cache.set(self._path, content)
-            os.remove(path)
-        return io.StringIO(content)
-
+    def get_header_lines_count(self) -> int:
+        if self.TYPE == 'video':
+            return 3
+        elif self.TYPE == 'images':
+            return 2
+        assert False, f"Unknown manifest type '{self.TYPE}'"
 
 # Needed for faster iteration over the manifest file, will be generated to work inside CVAT
 # and will not be generated when manually creating a manifest
 class _Index:
-    # TODO: create a temp in-memory version of it.
     FILE_NAME = 'index.json'
 
     def __init__(self, path):
-        self._path = self._init_path(path)
-        self._index = {}
-
-    def _init_path(self, path):
         assert path and os.path.isdir(path), 'No index directory path'
-        return os.path.join(path, self.FILE_NAME)
+        self._path = os.path.join(path, self.FILE_NAME)
+        self._index = {}
 
     @property
     def path(self):
@@ -341,8 +289,9 @@ class _Index:
     def remove(self):
         os.remove(self._path)
 
-    def create(self, manifest, skip):
-        with self._get_file(manifest) as manifest_file:
+    def create(self, manifest, *, skip):
+        assert os.path.exists(manifest), 'A manifest file not exists, index cannot be created'
+        with open(manifest, 'r+') as manifest_file:
             while skip:
                 manifest_file.readline()
                 skip -= 1
@@ -357,7 +306,8 @@ class _Index:
                 line = manifest_file.readline()
 
     def partial_update(self, manifest, number):
-        with self._get_file(manifest) as manifest_file:
+        assert os.path.exists(manifest), 'A manifest file not exists, index cannot be updated'
+        with open(manifest, 'r+') as manifest_file:
             manifest_file.seek(self._index[number])
             line = manifest_file.readline()
             while line:
@@ -367,52 +317,13 @@ class _Index:
                 line = manifest_file.readline()
 
     def __getitem__(self, number):
-        assert 0 <= number < len(self), \
-            'Invalid index number: {}\nMax: {}'.format(number, len(self) - 1)
+        if not 0 <= number < len(self):
+            raise IndexError('Invalid index number: {}\nMax: {}'.format(number, len(self) - 1))
+
         return self._index[number]
 
     def __len__(self):
         return len(self._index)
-
-    def _get_file(self, manifest):
-        t = type(manifest)
-        if t == str:
-            assert os.path.exists(manifest), 'A manifest file not exists, index cannot be created'
-            return open(manifest, 'r+')
-        elif issubclass(t, _Manifest):
-            return manifest.open_file()
-        else:
-            raise ValueError(f'Unsupported manifest type: {t.__name__}')
-
-
-class _CachedIndex(_Index):
-    # Index, which is stored in cache instead of local files.
-    def _init_path(self, path):
-        return os.path.join(path, self.FILE_NAME)
-
-    def dump(self):
-        default_cache.set(
-            self._path,
-            json.dumps(self._index, separators=(',', ':'))
-        )
-
-    def load(self):
-        self._index = json.loads(
-            default_cache.get(self._path),
-            object_hook=lambda d: {int(k): v for k, v in d.items()}
-        )
-
-    def remove(self):
-        default_cache.delete(self.path)
-
-
-def _set_index(func):
-    def wrapper(self, *args, **kwargs):
-        func(self, *args,  **kwargs)
-        if self._create_index:
-            self.set_index()
-    return wrapper
-
 
 class _ManifestManager(ABC):
     BASE_INFORMATION = {
@@ -420,19 +331,17 @@ class _ManifestManager(ABC):
         'type': 2,
     }
 
-    manifest_class: type = _Manifest
-    index_class: type = _Index
-
-    _required_item_attributes = {}
-
     def _json_item_is_valid(self, **state):
         for item in self._required_item_attributes:
             if state.get(item, None) is None:
-                raise Exception(f"Invalid '{self.manifest.name} file structure': '{item}' is required, but not found")
+                raise InvalidManifestError(
+                    f"Invalid '{self.manifest.name}' file structure: "
+                    f"'{item}' is required, but not found"
+                )
 
-    def __init__(self, path, create_index, upload_dir=None, *args, **kwargs):
-        self._manifest = self.manifest_class(path, upload_dir)
-        self._index = self.index_class(os.path.dirname(self._manifest.path))
+    def __init__(self, path, create_index, upload_dir=None):
+        self._manifest = _Manifest(path, upload_dir)
+        self._index = _Index(os.path.dirname(self._manifest.path))
         self._reader = None
         self._create_index = create_index
 
@@ -442,7 +351,7 @@ class _ManifestManager(ABC):
 
     def _parse_line(self, line):
         """ Getting a random line from the manifest file """
-        with self._manifest.open_file('r') as manifest_file:
+        with open(self._manifest.path, 'r') as manifest_file:
             if isinstance(line, str):
                 assert line in self.BASE_INFORMATION.keys(), \
                     'An attempt to get non-existent information from the manifest'
@@ -454,7 +363,7 @@ class _ManifestManager(ABC):
                 offset = self._index[line]
                 manifest_file.seek(offset)
                 properties = manifest_file.readline()
-                parsed_properties = json.loads(properties)
+                parsed_properties = ImageProperties(json.loads(properties))
                 self._json_item_is_valid(**parsed_properties)
                 return parsed_properties
 
@@ -462,11 +371,12 @@ class _ManifestManager(ABC):
         if os.path.exists(self._index.path):
             self._index.load()
         else:
-            self._index.create(self._manifest.path, 3 if self._manifest.TYPE == ManifestType.VIDEO else 2)
-            self._index.dump()
+            self._index.create(self._manifest.path, skip=self._manifest.get_header_lines_count())
+            if self._create_index:
+                self._index.dump()
 
     def reset_index(self):
-        if os.path.exists(self._index.path):
+        if self._create_index and os.path.exists(self._index.path):
             self._index.remove()
 
     def set_index(self):
@@ -480,24 +390,23 @@ class _ManifestManager(ABC):
 
     @abstractmethod
     def create(self, content=None, _tqdm=None):
-        pass
+        ...
 
     @abstractmethod
     def partial_update(self, number, properties):
-        pass
+        ...
 
     def __iter__(self):
-        with self._manifest.open_file('r') as manifest_file:
+        self.set_index()
+
+        with open(self._manifest.path, 'r') as manifest_file:
             manifest_file.seek(self._index[0])
-            image_number = 0
-            line = manifest_file.readline()
-            while line:
-                if line.strip():
-                    parsed_properties = json.loads(line)
-                    self._json_item_is_valid(**parsed_properties)
-                    yield (image_number, parsed_properties)
-                    image_number += 1
+            for idx, line_start in enumerate(self._index):
+                manifest_file.seek(line_start)
                 line = manifest_file.readline()
+                item = ImageProperties(json.loads(line))
+                self._json_item_is_valid(**item)
+                yield (idx, item)
 
     @property
     def manifest(self):
@@ -510,33 +419,36 @@ class _ManifestManager(ABC):
             return None
 
     def __getitem__(self, item):
+        if isinstance(item, slice):
+            return [self._parse_line(i) for i in range(item.start or 0, item.stop or len(self), item.step or 1)]
         return self._parse_line(item)
 
     @property
     def index(self):
         return self._index
 
-    @property
-    @abstractmethod
+    @abstractproperty
     def data(self):
-        pass
+        ...
 
     @abstractmethod
     def get_subset(self, subset_names):
-        pass
+        ...
 
+    @property
+    def exists(self):
+        return os.path.exists(self._manifest.path)
 
 class VideoManifestManager(_ManifestManager):
     _required_item_attributes = {'number', 'pts'}
 
     def __init__(self, manifest_path, create_index=True):
         super().__init__(manifest_path, create_index)
-        setattr(self._manifest, 'TYPE', ManifestType.VIDEO)
+        setattr(self._manifest, 'TYPE', 'video')
         self.BASE_INFORMATION['properties'] = 3
 
-    def link(self, media_file, upload_dir=None, chunk_size=36, force=False, only_key_frames=False, **kwargs):
-        ReaderClass = VideoStreamReader if not only_key_frames else KeyFramesVideoStreamReader
-        self._reader = ReaderClass(
+    def link(self, media_file, upload_dir=None, chunk_size=36, force=False, **kwargs):
+        self._reader = VideoStreamReader(
             os.path.join(upload_dir, media_file) if upload_dir else media_file,
             chunk_size,
             force)
@@ -557,7 +469,7 @@ class VideoManifestManager(_ManifestManager):
 
     def _write_core_part(self, file, _tqdm):
         iterable_obj = self._reader if _tqdm is None else \
-            _tqdm(self._reader, desc="Manifest creating", total=len(self._reader))
+            _tqdm(self._reader, desc="Manifest creating", total=float("inf"))
         for item in iterable_obj:
             if isinstance(item, tuple):
                 json_item = json.dumps({
@@ -567,23 +479,16 @@ class VideoManifestManager(_ManifestManager):
                 }, separators=(',', ':'))
                 file.write(f"{json_item}\n")
 
-    # pylint: disable=arguments-differ
-    @_set_index
-    def create(self, _tqdm=None):
+    def create(self, *, _tqdm=None): # pylint: disable=arguments-differ
         """ Creating and saving a manifest file """
-        if not len(self._reader):
-            with NamedTemporaryFile(mode='w', delete=False)as tmp_file:
-                self._write_core_part(tmp_file, _tqdm)
-            temp = tmp_file.name
-            with open(self._manifest.path, 'w') as manifest_file:
-                self._write_base_information(manifest_file)
-                with open(temp, 'r') as tmp_file:
-                    manifest_file.write(tmp_file.read())
-            os.remove(temp)
-        else:
-            with open(self._manifest.path, 'w') as manifest_file:
-                self._write_base_information(manifest_file)
-                self._write_core_part(manifest_file, _tqdm)
+        tmp_file = StringIO()
+        self._write_core_part(tmp_file, _tqdm)
+
+        with open(self._manifest.path, 'w') as manifest_file:
+            self._write_base_information(manifest_file)
+            manifest_file.write(tmp_file.getvalue())
+
+        self.set_index()
 
     def partial_update(self, number, properties):
         pass
@@ -606,7 +511,6 @@ class VideoManifestManager(_ManifestManager):
 
     def get_subset(self, subset_names):
         raise NotImplementedError()
-
 
 class VideoManifestValidator(VideoManifestManager):
     def __init__(self, source_path, manifest_path):
@@ -638,22 +542,17 @@ class VideoManifestValidator(VideoManifestManager):
                 self.validate_key_frame(container, video_stream, key_frame)
                 last_key_frame = key_frame
 
-    def validate_frame_numbers(self):
-        with closing(av.open(self._source_path, mode='r')) as container:
-            video_stream = self._get_video_stream(container)
-            # not all videos contain information about numbers of frames
-            frames = video_stream.frames
-            if frames:
-                assert frames == self.video_length, "The uploaded manifest does not match the video"
-                return
-
+class ImageProperties(dict):
+    @property
+    def full_name(self):
+        return f"{self['name']}{self['extension']}"
 
 class ImageManifestManager(_ManifestManager):
     _required_item_attributes = {'name', 'extension'}
 
     def __init__(self, manifest_path, upload_dir=None, create_index=True):
         super().__init__(manifest_path, create_index, upload_dir)
-        setattr(self._manifest, 'TYPE', ManifestType.IMAGES)
+        setattr(self._manifest, 'TYPE', 'images')
 
     def link(self, **kwargs):
         ReaderClass = DatasetImagesReader if not kwargs.get('DIM_3D', None) else Dataset3DImagesReader
@@ -678,7 +577,6 @@ class ImageManifestManager(_ManifestManager):
             }, separators=(',', ':'))
             file.write(f"{json_line}\n")
 
-    @_set_index
     def create(self, content=None, _tqdm=None):
         """ Creating and saving a manifest file for the specialized dataset"""
         with open(self._manifest.path, 'w') as manifest_file:
@@ -686,18 +584,20 @@ class ImageManifestManager(_ManifestManager):
             obj = content if content else self._reader
             self._write_core_part(manifest_file, obj, _tqdm)
 
+        self.set_index()
+
     def partial_update(self, number, properties):
         pass
 
     @property
     def data(self):
-        return (f"{image['name']}{image['extension']}" for _, image in self)
+        return (f"{image.full_name}" for _, image in self)
 
     def get_subset(self, subset_names):
         index_list = []
         subset = []
         for _, image in self:
-            image_name = f"{image['name']}{image['extension']}"
+            image_name = f"{image.full_name}"
             if image_name in subset_names:
                 index_list.append(subset_names.index(image_name))
                 properties = {
@@ -713,40 +613,75 @@ class ImageManifestManager(_ManifestManager):
                 subset.append(properties)
         return index_list, subset
 
+    def emulate_hierarchical_structure(
+        self,
+        page_size: int,
+        manifest_prefix: Optional[str] = None,
+        prefix: str = "",
+        default_prefix: Optional[str] = None,
+        start_index: Optional[int] = None,
+    ) -> Dict:
 
-class CachedIndexManifestManager(ImageManifestManager):
-    index_class = _CachedIndex
+        if default_prefix and prefix and not (default_prefix.startswith(prefix) or prefix.startswith(default_prefix)):
+            return {
+                'content': [],
+                'next': None,
+            }
 
-    def init_index(self):
-        if self._index.path in default_cache:
-            self._index.load()
+        search_prefix = prefix
+        if default_prefix and (len(prefix) < len(default_prefix)):
+            if prefix and '/' in default_prefix[len(prefix):]:
+                next_layer_and_tail = default_prefix[prefix.find('/') + 1:].split(
+                    "/", maxsplit=1
+                )
+                if 2 == len(next_layer_and_tail):
+                    directory = next_layer_and_tail[0]
+                    return {
+                        "content": [{"name": directory, "type": "DIR"}],
+                        "next": None,
+                    }
+                else:
+                    search_prefix = default_prefix
+            else:
+                search_prefix = default_prefix
+
+        next_start_index = None
+        # get part of manifest content
+        # generally we cannot rely to slice with manifest content because it may not be sorted.
+        # And then this can lead to incorrect index calculation.
+        if manifest_prefix:
+            content = [os.path.join(manifest_prefix, f[1].full_name) for f in self]
         else:
-            self._index.create(self._manifest, 2)
-            self._index.dump()
+            content = [f[1].full_name for f in self]
 
-    def reset_index(self):
-        default_cache.delete(self._index.path)
+        if search_prefix:
+            content = list(filter(lambda x: x.startswith(search_prefix), content))
+            if os.path.sep in search_prefix:
+                last_slash = search_prefix.rindex(os.path.sep)
+                content = [f[last_slash + 1:] for f in content]
 
-    def remove(self):
-        self.reset_index()
-        s3_client.delete_object(self.manifest.path)
+        files_in_root, files_in_directories = [], []
 
+        for f in content:
+            if os.path.sep in f:
+                files_in_directories.append(f)
+            else:
+                files_in_root.append(f)
 
-class S3ManifestManager(CachedIndexManifestManager):
-    manifest_class = _S3Manifest
+        directories = list(set([d.split(os.path.sep)[0] for d in files_in_directories]))
+        level_in_hierarchical_structure = [{'name': d, 'type': 'DIR'} for d in sort(directories, SortingMethod.NATURAL)]
+        level_in_hierarchical_structure.extend([{'name': f, 'type': 'REG'} for f in sort(files_in_root, SortingMethod.NATURAL)])
 
-    @_set_index
-    def create(self, content=None, _tqdm=None):
-        """ Creating and saving a manifest file for the specialized dataset"""
-        with TemporaryFile('w+t') as manifest_file:
-            self._write_base_information(manifest_file)
-            obj = content if content else self._reader
-            self._write_core_part(manifest_file, obj, _tqdm)
-            manifest_file.seek(0)
-            s3_client.upload_from_io(manifest_file, self._manifest.path)
+        level_in_hierarchical_structure = level_in_hierarchical_structure[start_index:]
+        if len(level_in_hierarchical_structure) > page_size:
+            level_in_hierarchical_structure = level_in_hierarchical_structure[:page_size]
+            next_start_index = start_index + page_size
 
+        return {
+            'content': level_in_hierarchical_structure,
+            'next': next_start_index,
+        }
 
-@injected_property('TYPE', error_message='Manifest Validator TYPE is not set. Please, use concrete classes.')
 class _BaseManifestValidator(ABC):
     def __init__(self, full_manifest_path):
         self._manifest = _Manifest(full_manifest_path)
@@ -754,36 +689,33 @@ class _BaseManifestValidator(ABC):
     def validate(self):
         try:
             # we cannot use index in general because manifest may be e.g. in share point with ro mode
-            with self._manifest.open_file('r') as manifest:
+            with open(self._manifest.path, 'r') as manifest:
                 for validator in self.validators:
                     line = json.loads(manifest.readline().strip())
                     validator(line)
             return True
-        except (ValueError, KeyError, JSONDecodeError):
+        except (ValueError, KeyError, JSONDecodeError, InvalidManifestError):
             return False
 
     @staticmethod
     def _validate_version(_dict):
-        if not _dict['version'] in ManifestVersion.choices():
-            raise ValueError('Incorrect version field')
+        if not _dict['version'] in _Manifest.SupportedVersion.choices():
+            raise InvalidManifestError('Incorrect version field')
 
     def _validate_type(self, _dict):
         if not _dict['type'] == self.TYPE:
-            raise ValueError('Incorrect type field')
+            raise InvalidManifestError('Incorrect type field')
 
-    @property
-    @abstractmethod
+    @abstractproperty
     def validators(self):
         pass
 
-    @staticmethod
-    @abstractmethod
+    @abstractstaticmethod
     def _validate_first_item(_dict):
         pass
 
-
 class _VideoManifestStructureValidator(_BaseManifestValidator):
-    TYPE = ManifestType.VIDEO
+    TYPE = 'video'
 
     @property
     def validators(self):
@@ -798,22 +730,21 @@ class _VideoManifestStructureValidator(_BaseManifestValidator):
     def _validate_properties(_dict):
         properties = _dict['properties']
         if not isinstance(properties['name'], str):
-            raise ValueError('Incorrect name field')
+            raise InvalidManifestError('Incorrect name field')
         if not isinstance(properties['resolution'], list):
-            raise ValueError('Incorrect resolution field')
+            raise InvalidManifestError('Incorrect resolution field')
         if not isinstance(properties['length'], int) or properties['length'] == 0:
-            raise ValueError('Incorrect length field')
+            raise InvalidManifestError('Incorrect length field')
 
     @staticmethod
     def _validate_first_item(_dict):
         if not isinstance(_dict['number'], int):
-            raise ValueError('Incorrect number field')
+            raise InvalidManifestError('Incorrect number field')
         if not isinstance(_dict['pts'], int):
-            raise ValueError('Incorrect pts field')
-
+            raise InvalidManifestError('Incorrect pts field')
 
 class _DatasetManifestStructureValidator(_BaseManifestValidator):
-    TYPE = ManifestType.IMAGES
+    TYPE = 'images'
 
     @property
     def validators(self):
@@ -826,31 +757,28 @@ class _DatasetManifestStructureValidator(_BaseManifestValidator):
     @staticmethod
     def _validate_first_item(_dict):
         if not isinstance(_dict['name'], str):
-            raise ValueError('Incorrect name field')
+            raise InvalidManifestError('Incorrect name field')
         if not isinstance(_dict['extension'], str):
-            raise ValueError('Incorrect extension field')
+            raise InvalidManifestError('Incorrect extension field')
         # FIXME
         # Width and height are required for 2D data, but
         # for 3D these parameters are not saved now.
         # It is necessary to uncomment these restrictions when manual preparation for 3D data is implemented.
 
         # if not isinstance(_dict['width'], int):
-        #     raise ValueError('Incorrect width field')
+        #     raise InvalidManifestError('Incorrect width field')
         # if not isinstance(_dict['height'], int):
-        #     raise ValueError('Incorrect height field')
-
+        #     raise InvalidManifestError('Incorrect height field')
 
 def is_manifest(full_manifest_path):
-    return _is_video_manifest(full_manifest_path) or \
-        _is_dataset_manifest(full_manifest_path)
+    return is_video_manifest(full_manifest_path) or \
+        is_dataset_manifest(full_manifest_path)
 
-
-def _is_video_manifest(full_manifest_path):
+def is_video_manifest(full_manifest_path):
     validator = _VideoManifestStructureValidator(full_manifest_path)
     return validator.validate()
 
-
-def _is_dataset_manifest(full_manifest_path):
+def is_dataset_manifest(full_manifest_path):
     validator = _DatasetManifestStructureValidator(full_manifest_path)
     return validator.validate()
 
@@ -866,3 +794,96 @@ def clean_filenames(manifest_path, skip=2):
             data = json.loads(line)
             data['name'] = get_valid_filename(data['name'])
             f.write(json.dumps(data, separators=(',', ':')) + '\n')
+
+
+@injected_property('TYPE', error_message='Manifest TYPE is not set. Please, use manager to initialize.')
+class _S3Manifest(_Manifest):
+    """Manifest stored on s3 instead of local files"""
+    def __init__(self, path, upload_dir=None):
+        # override super().__init__ to skip assert.
+        self._key = path if path.endswith('.jsonl') else os.path.join(path, self.FILE_NAME)
+        self._upload_dir = upload_dir
+
+        try:
+            self._path = s3_client.download_to_temp(self._key)
+        except ClientError:
+            with NamedTemporaryFile(delete=False) as f:
+                self._path = f.name
+
+    @property
+    def key(self):
+        return self._key
+
+    def __del__(self):
+        try:
+            os.remove(self._path)
+        except FileNotFoundError:
+            pass
+
+    # TODO: make manifest inmemory (get from s3, use from inmemory, then save back if needed)
+    #   rewrite corresponding classes: Manager, Validator, Index.
+
+
+class _CachedIndex(_Index):
+    """Index stored in cache instead of local files."""
+    def __init__(self, path):
+        # override super().__init__ to skip assert.
+        self._path = os.path.join(path, self.FILE_NAME)
+        self._index = {}
+
+    def dump(self):
+        default_cache.set(
+            self._path,
+            json.dumps(self._index, separators=(',', ':'))
+        )
+
+    def load(self):
+        self._index = json.loads(
+            default_cache.get(self._path),
+            object_hook=lambda d: {int(k): v for k, v in d.items()}
+        )
+
+    def remove(self):
+        default_cache.delete(self.path)
+
+
+class CachedIndexManifestManager(ImageManifestManager):
+    """Manifest manager with index stored in cache instead of local files"""
+    def __init__(self, manifest_path, upload_dir=None, create_index=True):
+        # override super().__init__ to skip asserts.
+        self._manifest = _Manifest(manifest_path, upload_dir)
+        self._index = _CachedIndex(os.path.dirname(self._manifest.path))
+        self._reader = None
+        self._create_index = create_index
+        setattr(self._manifest, 'TYPE', 'images')
+
+    def init_index(self):
+        if self._index.path in default_cache:
+            self._index.load()
+        else:
+            self._index.create(self._manifest.path, skip=self._manifest.get_header_lines_count())
+            if self._create_index:
+                self._index.dump()
+
+    def reset_index(self):
+        if self._create_index and self._index.path in default_cache:
+            self._index.remove()
+
+
+class S3ManifestManager(CachedIndexManifestManager):
+    """Manifest manager with manifest stored on s3 and index - in cache"""
+    def __init__(self, manifest_path, upload_dir=None, create_index=True):
+        # override super().__init__ to avoid re-creating index and manifest
+        self._manifest = _S3Manifest(manifest_path, upload_dir)
+        self._index = _CachedIndex(os.path.dirname(self._manifest.key))
+        self._reader = None
+        self._create_index = create_index
+        setattr(self._manifest, 'TYPE', 'images')
+
+    def remove(self):
+        super().remove()
+        s3_client.delete_object(self._manifest.key)
+
+    def create(self, content=None, _tqdm=None):
+        super().create()
+        s3_client.upload_from_path(self._manifest.path, self._manifest.key)
