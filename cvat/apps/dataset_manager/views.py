@@ -23,6 +23,7 @@ from .formats.registry import EXPORT_FORMATS, IMPORT_FORMATS
 from .util import current_function_name
 
 from cvat.rebotics.s3_client import s3_client
+from django.db.models import F
 
 slogger = ServerLogManager(__name__)
 
@@ -51,23 +52,32 @@ def export(dst_format, project_id=None, task_id=None, job_id=None, server_url=No
             cache_ttl = TASK_CACHE_TTL
             export_fn = task.export_task
             db_instance = Task.objects.get(pk=task_id)
+            task_name = make_file_name(to_snake_case(db_instance.name[:50]))
+            base_name = f'task_{db_instance.id}_{task_name}'
         elif project_id is not None:
             logger = slogger.project[project_id]
             cache_ttl = PROJECT_CACHE_TTL
             export_fn = project.export_project
             db_instance = Project.objects.get(pk=project_id)
+            project_name = make_file_name(to_snake_case(db_instance.name[:50]))
+            base_name = f'project_{db_instance.id}_{project_name}'
         else:
             logger = slogger.job[job_id]
             cache_ttl = JOB_CACHE_TTL
             export_fn = task.export_job
-            db_instance = Job.objects.get(pk=job_id)
+            db_instance = Job.objects.annotate(
+                task_id=F('segment__task__pk'),
+                task_name=F('segment__task__name')
+            ).get(pk=job_id)
+            task_name = make_file_name(to_snake_case(db_instance.task_name[:50]))
+            base_name = f'task_{db_instance.task_id}_job_{db_instance.id}_{task_name}'
 
         cache_dir = get_export_cache_dir(db_instance)
 
         exporter = EXPORT_FORMATS[dst_format]
-        output_base = '%s_%s' % ('dataset' if save_images else 'annotations',
+        output_base = '%s_%s_%s' % (base_name, 'dataset' if save_images else 'annotations',
             make_file_name(to_snake_case(dst_format)))
-        output_path = '%s.%s' % (output_base, exporter.EXT)
+        output_path = '%s.%s' % (output_base, exporter.EXT.lower())
         output_path = osp.join(cache_dir, output_path)
 
         if settings.USE_CACHE_S3:
@@ -156,7 +166,7 @@ def get_all_formats():
 
 def export_to_s3(dst_format, db_instance, export_fn, output_base, server_url, save_images, cache_ttl, logger):
     exporter = EXPORT_FORMATS[dst_format]
-    output_filename = f'{output_base}.{exporter.EXT}'
+    output_filename = f'{output_base}.{exporter.EXT.lower()}'
     instance_type_name = type(db_instance).__name__.lower() + 's'
     output_path = osp.join(settings.S3_CACHE_ROOT, 'export', instance_type_name, str(db_instance.pk), output_filename)
     logger.info(f'Exporting {output_path} to s3.')
