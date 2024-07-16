@@ -25,7 +25,7 @@ cmd_run() {
         fail "run: expected 1 argument"
     fi
 
-    if [ "$1" = "server" ]; then
+    if [ "$1" = "all" ]; then
         ~/manage.py collectstatic --no-input
     fi
 
