@@ -38,10 +38,10 @@ patch:
 	bump2version --allow-dirty --config-file ./.bumpversion patch
 
 minor:
-	bump2version --config-file ./.bumpversion minor
+	echo "Major and minor bumps are not supported, update them manually when updating from upstream"
 
 major:
-	bump2version --config-file ./.bumpversion major
+	echo "Major and minor bumps are not supported, update them manually when updating from upstream"
 
 unpatch:
 	git tag -d v`cat ./VERSION`
