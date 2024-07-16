@@ -43,7 +43,6 @@ services:
       .env.local
     environment:
       no_proxy: clickhouse,grafana,vector,nuclio,opa,${no_proxy:-}
-    command: init run server
     volumes:
       - reb_cvat_data:/home/django/data
     ports:
