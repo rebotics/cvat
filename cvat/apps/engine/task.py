@@ -525,6 +525,8 @@ def _create_noatomic(
         job.meta['status'] = msg
         job.save_meta()
 
+    os.makedirs(upload_dir, exist_ok=True)
+
     if data['remote_files'] and not isDatasetImport:
         data['remote_files'] = _download_files(db_data, upload_dir)
 
