@@ -1,5 +1,5 @@
 [bumpversion]
-current_version = 2.11.0.2
+current_version = 2.11.0.3
 parse = 2.11.0.(?P<patch>\d+)
 serialize = 2.11.0.{patch}
 commit = True
