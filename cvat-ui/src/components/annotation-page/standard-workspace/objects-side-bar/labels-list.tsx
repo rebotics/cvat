@@ -1,5 +1,5 @@
 // Copyright (C) 2020-2022 Intel Corporation
-// Copyright (C) 2022 CVAT.ai Corporation
+// Copyright (C) 2022-2024 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
@@ -12,6 +12,21 @@ import { CombinedState, ObjectType } from 'reducers';
 import { rememberObject, updateAnnotationsAsync } from 'actions/annotation-actions';
 import LabelItemContainer from 'containers/annotation-page/standard-workspace/objects-side-bar/label-item';
 import GlobalHotKeys from 'utils/mousetrap-react';
+import Text from 'antd/lib/typography/Text';
+import { ShortcutScope } from 'utils/enums';
+import { registerComponentShortcuts } from 'actions/shortcuts-actions';
+import { subKeyMap } from 'utils/component-subkeymap';
+
+const componentShortcuts = {
+    SWITCH_LABEL: {
+        name: 'Switch label',
+        description: 'Changes a label for an activated object or for the next drawn object if no objects are activated',
+        sequences: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'].map((val: string): string => `ctrl+${val}`),
+        scope: ShortcutScope.ALL,
+    },
+};
+
+registerComponentShortcuts(componentShortcuts);
 
 function LabelsListComponent(): JSX.Element {
     const dispatch = useDispatch();
@@ -21,7 +36,6 @@ function LabelsListComponent(): JSX.Element {
     const activeObjectType = useSelector((state: CombinedState) => state.annotation.drawing.activeObjectType);
     const states = useSelector((state: CombinedState) => state.annotation.annotations.states);
     const keyMap = useSelector((state: CombinedState) => state.shortcuts.keyMap);
-
     const labelIDs = labels.map((label: any): number => label.id);
 
     const [keyToLabelMapping, setKeyToLabelMapping] = useState<Record<string, number>>(
@@ -64,11 +78,7 @@ function LabelsListComponent(): JSX.Element {
         [keyToLabelMapping],
     );
 
-    const subKeyMap = {
-        SWITCH_LABEL: keyMap.SWITCH_LABEL,
-    };
-
-    const handlers = {
+    const handlers: Record<keyof typeof componentShortcuts, (event: KeyboardEvent, shortcut: string) => void> = {
         SWITCH_LABEL: (event: KeyboardEvent | undefined, shortcut: string) => {
             if (event) event.preventDefault();
             const labelID = keyToLabelMapping[shortcut.split('+')[1].trim()];
@@ -99,7 +109,10 @@ function LabelsListComponent(): JSX.Element {
 
     return (
         <div className='cvat-objects-sidebar-labels-list'>
-            <GlobalHotKeys keyMap={subKeyMap} handlers={handlers} />
+            <GlobalHotKeys keyMap={subKeyMap(componentShortcuts, keyMap)} handlers={handlers} />
+            <div className='cvat-objects-sidebar-labels-list-header'>
+                <Text>{`Items: ${labels.length}`}</Text>
+            </div>
             {labelIDs.map(
                 (labelID: number): JSX.Element => (
                     <LabelItemContainer

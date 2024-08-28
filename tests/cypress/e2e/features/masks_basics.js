@@ -107,10 +107,7 @@ context('Manipulations with masks', { scrollBehavior: false }, () => {
             cy.drawMask(drawingActions);
             cy.finishMaskDrawing();
 
-            cy.get('#cvat-objects-sidebar-state-item-1').find('[aria-label="more"]').trigger('mouseover');
-            cy.get('.cvat-object-item-menu').within(() => {
-                cy.contains('button', 'Propagate').click();
-            });
+            cy.interactAnnotationObjectMenu('#cvat-objects-sidebar-state-item-1', 'Propagate');
             cy.get('.cvat-propagate-confirm-up-to-input').find('input')
                 .should('have.attr', 'value', serverFiles.length - 1);
             cy.contains('button', 'Yes').click();
@@ -125,10 +122,7 @@ context('Manipulations with masks', { scrollBehavior: false }, () => {
             cy.drawMask(drawingActions);
             cy.finishMaskDrawing();
 
-            cy.get('#cvat-objects-sidebar-state-item-1').within(() => {
-                cy.get('[aria-label="more"]').trigger('mouseover');
-            });
-            cy.get('.cvat-object-item-menu').last().should('be.visible').contains('button', 'Make a copy').click();
+            cy.interactAnnotationObjectMenu('#cvat-objects-sidebar-state-item-1', 'Make a copy');
             cy.goCheckFrameNumber(serverFiles.length - 1);
             cy.get('.cvat-canvas-container').click();
             cy.get('#cvat_canvas_shape_2').should('exist').and('be.visible');
@@ -160,11 +154,45 @@ context('Manipulations with masks', { scrollBehavior: false }, () => {
             cy.drawMask(drawingActions);
             cy.finishMaskDrawing();
 
-            cy.get('#cvat-objects-sidebar-state-item-1').within(() => {
-                cy.get('[aria-label="more"]').trigger('mouseover');
-            });
-            cy.get('.cvat-object-item-menu').last().should('be.visible').contains('button', 'Edit').click();
+            cy.interactAnnotationObjectMenu('#cvat-objects-sidebar-state-item-1', 'Edit');
             cy.drawMask(editingActions);
+            cy.finishMaskDrawing();
+        });
+
+        it('Underlying pixels are removed on enabling "Remove underlying pixels" tool', () => {
+            const mask1 = [{
+                method: 'brush',
+                coordinates: [[450, 250], [600, 400]],
+            }];
+            const mask2 = [{
+                method: 'brush',
+                coordinates: [[450, 250], [525, 325]],
+            }];
+
+            cy.startMaskDrawing();
+            cy.drawMask(mask1);
+            cy.get('.cvat-brush-tools-continue').click();
+
+            cy.drawMask(mask2);
+            cy.get('.cvat-brush-tools-underlying-pixels').click();
+            cy.get('.cvat-brush-tools-underlying-pixels').should('have.class', 'cvat-brush-tools-active-tool');
+            cy.finishMaskDrawing();
+
+            cy.get('#cvat-objects-sidebar-state-item-2').within(() => {
+                cy.get('.cvat-object-item-button-hidden').click();
+            });
+
+            cy.get('.cvat-canvas-container').then(([$canvas]) => {
+                cy.wrap($canvas).trigger('mousemove', { clientX: 450, clientY: 250 });
+                cy.get('#cvat_canvas_shape_1').should('not.have.class', 'cvat_canvas_shape_activated');
+
+                cy.wrap($canvas).trigger('mousemove', { clientX: 550, clientY: 350 });
+                cy.get('#cvat_canvas_shape_1').should('have.class', 'cvat_canvas_shape_activated');
+            });
+
+            cy.startMaskDrawing();
+            cy.get('.cvat-brush-tools-underlying-pixels').click();
+            cy.get('.cvat-brush-tools-underlying-pixels').should('not.have.class', 'cvat-brush-tools-active-tool');
             cy.finishMaskDrawing();
         });
     });
@@ -172,6 +200,7 @@ context('Manipulations with masks', { scrollBehavior: false }, () => {
     describe('Tests to make sure that empty masks cannot be created', () => {
         beforeEach(() => {
             cy.removeAnnotations();
+            cy.saveJob('PUT');
         });
 
         function checkEraseTools(baseTool = '.cvat-brush-tools-brush', disabled = true) {
@@ -309,10 +338,7 @@ context('Manipulations with masks', { scrollBehavior: false }, () => {
             cy.drawMask(mask);
             cy.finishMaskDrawing();
 
-            cy.get('#cvat-objects-sidebar-state-item-1').within(() => {
-                cy.get('[aria-label="more"]').trigger('mouseover');
-            });
-            cy.get('.cvat-object-item-menu').last().should('be.visible').contains('button', 'Edit').click();
+            cy.interactAnnotationObjectMenu('#cvat-objects-sidebar-state-item-1', 'Edit');
             cy.drawMask(eraseAction);
             cy.finishMaskDrawing();
 

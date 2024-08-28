@@ -1,4 +1,5 @@
 # Copyright (C) 2018-2022 Intel Corporation
+# Copyright (C) 2024 CVAT.ai Corporation
 #
 # SPDX-License-Identifier: MIT
 
@@ -21,9 +22,14 @@ class EngineConfig(AppConfig):
         # Required in order to silent "unused-import" in pyflake
         assert cvat.apps.engine.signals
 
+        from cvat.apps.iam.permissions import load_app_permissions
+        load_app_permissions(self)
+
         self._track_version()
 
     def _track_version(self):
+        # TODO: remove mod_wsgi check from here.
+        # it's probably not actual anymore.
         if settings.VERSION_TRACKER_URL and not settings.DEBUG and 'mod_wsgi' in sys.argv:
             try:
                 response = requests.post(settings.VERSION_TRACKER_URL, json={

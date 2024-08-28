@@ -1,5 +1,5 @@
 // Copyright (C) 2020-2022 Intel Corporation
-// Copyright (C) 2023 CVAT.ai Corporation
+// Copyright (C) 2023-2024 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
@@ -110,6 +110,7 @@ context('Label constructor. Color label. Label name editing', () => {
             });
             cy.get('.cvat-change-task-label-color-button').click();
             cy.changeColorViaBadge(labelColor.yellowHex);
+            cy.get('.cvat-label-color-picker').should('be.hidden');
             cy.get('[placeholder="Label name"]').clear();
             cy.get('[placeholder="Label name"]').type(colorYellow); // Check PR 2806
             cy.contains('button', 'Done').click();
@@ -135,16 +136,14 @@ context('Label constructor. Color label. Label name editing', () => {
             cy.addNewLabel({ name: `Case ${caseId}` });
             cy.get('.cvat-constructor-viewer').should('be.visible');
             cy.contains('.cvat-constructor-viewer-item', `Case ${caseId}`)
-                .invoke('attr', 'style')
+                .invoke('css', 'background-color')
                 .then(($labelColor) => {
                     // Change the label color and press "Cancel"
                     cy.contains('.cvat-constructor-viewer-item', `Case ${caseId}`).find('[data-icon="edit"]').click();
                     cy.get('.cvat-change-task-label-color-badge')
                         .children()
-                        .invoke('attr', 'style')
-                        .then(($labelBadgeColor) => {
-                            expect($labelBadgeColor).to.be.equal($labelColor);
-                        });
+                        .first()
+                        .should('have.css', 'color', $labelColor);
                     cy.get('.cvat-change-task-label-color-button').click();
                     cy.get('.cvat-label-color-picker')
                         .not('.ant-popover-hidden')
@@ -158,7 +157,7 @@ context('Label constructor. Color label. Label name editing', () => {
                     cy.get('.cvat-label-color-picker').should('be.hidden');
                     cy.get('.cvat-change-task-label-color-badge')
                         .children()
-                        .invoke('attr', 'style')
+                        .invoke('css', 'background-color')
                         .then(($labelBadgeColor) => {
                             expect($labelBadgeColor).to.be.equal($labelColor);
                         });
@@ -166,6 +165,7 @@ context('Label constructor. Color label. Label name editing', () => {
                     // Change the label color
                     cy.get('.cvat-change-task-label-color-button').click();
                     cy.changeColorViaBadge(labelColor.yellowHex);
+                    cy.get('.cvat-label-color-picker').should('be.hidden');
 
                     // Reset the label color
                     cy.get('.cvat-change-task-label-color-button').click();
