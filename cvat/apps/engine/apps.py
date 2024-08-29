@@ -28,9 +28,7 @@ class EngineConfig(AppConfig):
         self._track_version()
 
     def _track_version(self):
-        # TODO: remove mod_wsgi check from here.
-        # it's probably not actual anymore.
-        if settings.VERSION_TRACKER_URL and not settings.DEBUG and 'mod_wsgi' in sys.argv:
+        if settings.VERSION_TRACKER_URL and not settings.DEBUG and 'uvicorn' in sys.argv:
             try:
                 response = requests.post(settings.VERSION_TRACKER_URL, json={
                     'application': 'cvat',
