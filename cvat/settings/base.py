@@ -731,8 +731,6 @@ CLOUD_DATA_DOWNLOADING_NUMBER_OF_FILES_PER_THREAD = 1000
 ####################################
 #  Rebotics extras and overrides.  #
 ####################################
-# TODO: check overrides, that they are still
-# matching original settings.
 
 # Rebotics info settings
 home = os.getenv('HOME')
@@ -895,8 +893,9 @@ IAM_OPA_DATA_URL = f'{IAM_OPA_HOST}/v1/data'
 LOGGING['root']['handlers'] = ['console']
 
 SPECTACULAR_SETTINGS['TITLE'] = 'Rebotics CVAT REST API'
+SPECTACULAR_SETTINGS['VERSION'] = VERSION
 SPECTACULAR_SETTINGS['CONTACT'] = {
     'name': 'Rebotics BE team',
     'url': 'https://github.com/retech-us/cvat',
-    'email': 'farid@retechlabs.com',
+    'email': 'farid.khalikov@symphonyai.com',
 }
