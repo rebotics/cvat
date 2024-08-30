@@ -30,8 +30,10 @@ from .util import (
 )
 from .util import EXPORT_CACHE_DIR_NAME  # pylint: disable=unused-import
 
-from cvat.rebotics.s3_client import s3_client
 from django.db.models import F
+from datumaro.util import to_snake_case
+from datumaro.util.os_util import make_file_name
+from cvat.rebotics.s3_client import s3_client
 
 slogger = ServerLogManager(__name__)
 
@@ -42,11 +44,6 @@ def log_exception(logger=None, exc_info=True):
     logger.exception("[%s @ %s]: exception occurred" % \
             (_MODULE_NAME, current_function_name(2)),
         exc_info=exc_info)
-
-# TODO: they remove it, is it still needed?
-def get_export_cache_dir(db_instance):
-    base_dir = osp.abspath(db_instance.get_dirname())
-    return osp.join(base_dir, 'export_cache')
 
 DEFAULT_CACHE_TTL = timedelta(seconds=settings.DATASET_CACHE_TTL)
 PROJECT_CACHE_TTL = DEFAULT_CACHE_TTL
@@ -106,23 +103,15 @@ def _retry_current_rq_job(time_delta: timedelta) -> rq.job.Job:
     return current_rq_job
 
 def export(dst_format, project_id=None, task_id=None, job_id=None, server_url=None, save_images=False):
-    # TODO: make_file_name and to_snake_case were imported as:
-    # from datumaro.util.os_util import make_file_name
-    # from datumaro.util import to_snake_case
-    # now removed. Remove or replace these for names.
     try:
         if task_id is not None:
             logger = slogger.task[task_id]
             export_fn = task.export_task
             db_instance = Task.objects.get(pk=task_id)
-            task_name = make_file_name(to_snake_case(db_instance.name[:50]))
-            base_name = f'task_{db_instance.id}_{task_name}'
         elif project_id is not None:
             logger = slogger.project[project_id]
             export_fn = project.export_project
             db_instance = Project.objects.get(pk=project_id)
-            project_name = make_file_name(to_snake_case(db_instance.name[:50]))
-            base_name = f'project_{db_instance.id}_{project_name}'
         else:
             logger = slogger.job[job_id]
             export_fn = task.export_job
@@ -130,23 +119,14 @@ def export(dst_format, project_id=None, task_id=None, job_id=None, server_url=No
                 task_id=F('segment__task__pk'),
                 task_name=F('segment__task__name')
             ).get(pk=job_id)
-            task_name = make_file_name(to_snake_case(db_instance.task_name[:50]))
-            base_name = f'task_{db_instance.task_id}_job_{db_instance.id}_{task_name}'
 
         cache_ttl = get_export_cache_ttl(db_instance)
 
         cache_dir = get_export_cache_dir(db_instance)
 
-        # TODO: This used to get filename, now it's not there.
-        # exporter = EXPORT_FORMATS[dst_format]
-        # output_base = '%s_%s_%s' % (base_name, 'dataset' if save_images else 'annotations',
-        #                             make_file_name(to_snake_case(dst_format)))
-        # output_path = '%s.%s' % (output_base, exporter.EXT.lower())
-        # output_path = osp.join(cache_dir, output_path)
-
         if settings.USE_CACHE_S3:
-            return export_to_s3(dst_format, db_instance, export_fn, output_base,
-                                server_url, save_images, cache_ttl, logger)
+            return export_to_s3(dst_format, db_instance, export_fn, server_url,
+                                save_images, cache_ttl, logger)
 
         # As we're not locking the db object here, it can be updated by the time of actual export.
         # The file will be saved with the older timestamp.
@@ -293,12 +273,16 @@ def get_all_formats():
     }
 
 
-# TODO: check if it still consistent with original
-def export_to_s3(dst_format, db_instance, export_fn, output_base, server_url, save_images, cache_ttl, logger):
+def export_to_s3(dst_format, db_instance, export_fn, server_url, save_images, cache_ttl, logger):
     exporter = EXPORT_FORMATS[dst_format]
-    output_filename = f'{output_base}.{exporter.EXT.lower()}'
-    instance_type_name = type(db_instance).__name__.lower() + 's'
-    output_path = osp.join(settings.S3_CACHE_ROOT, 'export', instance_type_name, str(db_instance.pk), output_filename)
+    instance_type_name = type(db_instance).__name__.lower()
+    format_name = make_file_name(to_snake_case(dst_format))
+    export_type = 'dataset' if save_images else 'annotations'
+    file_ext = exporter.EXT.lower()
+    output_filename = f'{instance_type_name}_{db_instance.pk}_{format_name}_{export_type}.{file_ext}'
+
+    output_path = osp.join(settings.S3_CACHE_ROOT, 'export', instance_type_name + 's',
+                           str(db_instance.pk), output_filename)
     logger.info(f'Exporting {output_path} to s3.')
 
     cache_info = s3_client.exists(output_path)
