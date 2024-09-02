@@ -574,8 +574,6 @@ class CVATApplication extends React.PureComponent<CVATAppProps & RouteComponentP
                 );
             }
 
-            /* TODO: Check were isRegistrationEnabled
-            does come from and set it to false */
             return (
                 <GlobalErrorBoundary>
                     <>

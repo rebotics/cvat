@@ -28,7 +28,7 @@ urlpatterns = [
 
 if settings.IAM_TYPE == 'BASIC':
     urlpatterns += [
-        # TODO: we disable it, check if it still works.
+        # Disable registration
         # path('register', RegisterViewEx.as_view(), name=BASIC_REGISTER_PATH_NAME),
         # password
         path('password/reset', PasswordResetView.as_view(),
