@@ -1276,8 +1276,10 @@ class TaskViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
             if 'stop_frame' not in serializer.validated_data:
                 data['stop_frame'] = None
 
-            task.create(db_task, data, self.request)
-            return Response(data=serializer.data, status=status.HTTP_202_ACCEPTED)
+            rq_id = task.create(db_task, data, self.request)
+            rq_id_serializer = RqIdSerializer(data={'rq_id': rq_id})
+            rq_id_serializer.is_valid(raise_exception=True)
+            return Response(rq_id_serializer.data, status=status.HTTP_202_ACCEPTED)
 
     _UPLOAD_FILE_ORDER_FIELD = 'upload_file_order'
     assert _UPLOAD_FILE_ORDER_FIELD in DataSerializer().fields

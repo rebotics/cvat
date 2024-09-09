@@ -2339,8 +2339,8 @@ s3Axios.defaults.params = {};
 async function createS3Task(
     taskSpec: Partial<SerializedTask>,
     taskDataSpec: any,
-    onUpdate: (state: RQStatus, progress: number, message: string) => void,
-): Promise<SerializedTask> {
+    onUpdate: (request: Request) => void,
+): Promise<{ taskID: number, rqID: string }> {
     const { backendAPI, origin } = config;
     // keep current default params to 'freeze" them during this request
     const params = enableOrganization();
@@ -2367,7 +2367,12 @@ async function createS3Task(
 
     let response = null;
 
-    onUpdate(RQStatus.UNKNOWN, 0, 'CVAT is creating your task');
+    onUpdate(new Request({
+        status: RQStatus.UNKNOWN,
+        progress: 0,
+        message: 'CVAT is creating your task',
+    }));
+
     try {
         response = await Axios.post(`${backendAPI}/tasks`, taskSpec, {
             params,
@@ -2379,8 +2384,13 @@ async function createS3Task(
         throw generateError(errorData);
     }
     const taskId = response.data.id;
+    let rqId = null;
 
-    onUpdate(RQStatus.UNKNOWN, 0, 'CVAT is uploading task data to the server');
+    onUpdate(new Request({
+        status: RQStatus.UNKNOWN,
+        progress: 0,
+        message: 'CVAT is uploading task data to the server',
+    }));
 
     try {
         response = await Axios.post(
@@ -2408,14 +2418,20 @@ async function createS3Task(
 
             totalSentSize += clientFiles[i].size;
             const percentage = totalSentSize / totalSize;
-            onUpdate(RQStatus.UNKNOWN, percentage, 'CVAT is uploading task data to the server');
+            onUpdate(new Request({
+                status: RQStatus.UNKNOWN,
+                progress: percentage,
+                message: 'CVAT is uploading task data to the server',
+            }));
         }
 
-        await Axios.put(
+        response = await Axios.put(
             `${backendAPI}/tasks/${taskId}/s3-data`,
             taskData,
             { params },
         );
+
+        rqId = response.data.rq_id;
     } catch (errorData) {
         try {
             await deleteTask(taskId, params.org || null);
@@ -2425,13 +2441,7 @@ async function createS3Task(
         throw generateError(errorData);
     }
 
-    try {
-        const createdTask = await listenToCreateTask(taskId, onUpdate);
-        return createdTask;
-    } catch (createException) {
-        await deleteTask(taskId, params.org || null);
-        throw createException;
-    }
+    return { taskID: taskId, rqID: rqId };
 }
 // override
 createTask = createS3Task;
