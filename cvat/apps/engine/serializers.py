@@ -39,6 +39,9 @@ from cvat.apps.engine.media_extractors import sort
 
 from drf_spectacular.utils import OpenApiExample, extend_schema_field, extend_schema_serializer
 
+from django.conf import settings
+from cvat.rebotics.s3_client import s3_client
+
 slogger = ServerLogManager(__name__)
 
 class WriteOnceMixin:
@@ -2340,7 +2343,12 @@ class RequestSerializer(serializers.Serializer):
 
         if representation["status"] == RQJobStatus.FINISHED:
             if result_url := rq_job.meta.get(RQJobMetaField.RESULT_URL):
-                representation["result_url"] = result_url
+                if settings.USE_CACHE_S3:
+                    s3_path = rq_job.return_value()
+                    if s3_client.exists(s3_path):
+                        representation['result_url'] = s3_client.get_presigned_url(s3_path)
+                else:
+                    representation["result_url"] = result_url
 
             if (
                 rq_job.parsed_rq_id.action == models.RequestAction.IMPORT

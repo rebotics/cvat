@@ -3242,16 +3242,6 @@ def _import_annotations(request, rq_id_factory, rq_func, db_obj, format_name,
 
     return Response(status=status.HTTP_202_ACCEPTED)
 
-# TODO: _export_annotations removed from here
-# it used:
-# if settings.USE_CACHE_S3:
-#     if s3_client.exists(file_path):
-#         rq_job.delete()
-#         return Response({'url': s3_client.get_presigned_url(file_path)}, status=status.HTTP_201_CREATED)
-#     else:
-#         return Response(f'Exported file {filename} not found on s3.', status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
 def _import_project_dataset(
     request, rq_id_factory, rq_func, db_obj, format_name,
     filename=None, conv_mask_to_poly=True, location_conf=None

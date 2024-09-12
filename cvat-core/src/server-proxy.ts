@@ -832,11 +832,6 @@ function exportDataset(instanceType: 'projects' | 'jobs' | 'tasks') {
                     .catch((errorData) => {
                         reject(generateError(errorData));
                     });
-                /* TODO: check BE to get response.data.url
-                 * previously this did get request and
-                 * on 201 returned url in data
-                 * and on 202 cheked again after timeout
-                 * where does it check now? */
             }
 
             setTimeout(request);
