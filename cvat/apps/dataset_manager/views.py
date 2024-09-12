@@ -122,11 +122,11 @@ def export(dst_format, project_id=None, task_id=None, job_id=None, server_url=No
 
         cache_ttl = get_export_cache_ttl(db_instance)
 
-        cache_dir = get_export_cache_dir(db_instance)
-
         if settings.USE_CACHE_S3:
             return export_to_s3(dst_format, db_instance, export_fn, server_url,
                                 save_images, cache_ttl, logger)
+
+        cache_dir = get_export_cache_dir(db_instance)
 
         # As we're not locking the db object here, it can be updated by the time of actual export.
         # The file will be saved with the older timestamp.
