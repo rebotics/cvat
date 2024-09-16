@@ -15,23 +15,21 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ImproperlyConfigured
 from django.utils import timezone
 
+from cvat.apps.engine.models import TimestampedModel
 
-class Organization(models.Model):
+class Organization(TimestampedModel):
     slug = models.SlugField(max_length=16, blank=False, unique=True)
     name = models.CharField(max_length=64, blank=True)
     description = models.TextField(blank=True)
-    created_date = models.DateTimeField(auto_now_add=True)
-    updated_date = models.DateTimeField(auto_now=True)
     contact = models.JSONField(blank=True, default=dict)
-    owner = models.ForeignKey(get_user_model(), null=True, blank=True,
-                              on_delete=models.SET_NULL, related_name='+')
+
+    owner = models.ForeignKey(get_user_model(), null=True,
+        blank=True, on_delete=models.SET_NULL, related_name='+')
 
     def __str__(self):
         return self.slug
-
     class Meta:
         default_permissions = ()
-
 
 class Membership(models.Model):
     WORKER = 'worker'
@@ -40,9 +38,9 @@ class Membership(models.Model):
     OWNER = 'owner'
 
     user = models.ForeignKey(get_user_model(), on_delete=models.CASCADE,
-                             null=True, related_name='memberships')
+        null=True, related_name='memberships')
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE,
-                                     related_name='members')
+        related_name='members')
     is_active = models.BooleanField(default=False)
     joined_date = models.DateTimeField(null=True)
     role = models.CharField(max_length=16, choices=[

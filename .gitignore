@@ -20,6 +20,7 @@ __pycache__
 ._*
 .coverage
 .husky/
+.python-version
 
 # Ignore npm logs file
 npm-debug.log*
@@ -62,6 +63,9 @@ cvat-core/docs
 cvat-core/reports
 # produced by prepare in the root package.json script
 .husky
+
+# produced by cvat/apps/iam/rules/tests/generate_tests.py
+/cvat/apps/*/rules/*_test.gen.rego
 
 .s3
 .env.local*

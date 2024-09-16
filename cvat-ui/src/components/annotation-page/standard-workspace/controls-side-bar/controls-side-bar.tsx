@@ -1,5 +1,5 @@
 // Copyright (C) 2020-2022 Intel Corporation
-// Copyright (C) 2022-2023 CVAT.ai Corporation
+// Copyright (C) 2022-2024 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
@@ -7,11 +7,15 @@ import React from 'react';
 import Layout from 'antd/lib/layout';
 
 import {
-    ActiveControl, ObjectType, Rotation, ShapeType, CombinedState,
+    ActiveControl, Rotation, CombinedState,
 } from 'reducers';
 import GlobalHotKeys, { KeyMap } from 'utils/mousetrap-react';
 import { Canvas, CanvasMode } from 'cvat-canvas-wrapper';
+import { LabelType } from 'cvat-core-wrapper';
 
+import { ShortcutScope } from 'utils/enums';
+import { registerComponentShortcuts } from 'actions/shortcuts-actions';
+import { subKeyMap } from 'utils/component-subkeymap';
 import ControlVisibilityObserver, { ExtraControlsControl } from './control-visibility-observer';
 import RotateControl, { Props as RotateControlProps } from './rotate-control';
 import CursorControl, { Props as CursorControlProps } from './cursor-control';
@@ -53,7 +57,37 @@ interface Props {
     redrawShape(): void;
 }
 
-// We use the observer to see if these controls are in the viewport
+const componentShortcuts = {
+    CLOCKWISE_ROTATION: {
+        name: 'Rotate clockwise',
+        description: 'Change image angle (add 90 degrees)',
+        sequences: ['ctrl+r'],
+        scope: ShortcutScope.ALL,
+    },
+    ANTICLOCKWISE_ROTATION: {
+        name: 'Rotate anticlockwise',
+        description: 'Change image angle (subtract 90 degrees)',
+        sequences: ['ctrl+shift+r'],
+        scope: ShortcutScope.ALL,
+    },
+    PASTE_SHAPE: {
+        name: 'Paste shape',
+        description: 'Paste a shape from internal CVAT clipboard',
+        sequences: ['ctrl+v'],
+        scope: ShortcutScope.ALL,
+    },
+    SWITCH_DRAW_MODE: {
+        name: 'Draw mode',
+        description:
+            'Repeat the latest procedure of drawing with the same parameters (shift to redraw an existing shape)',
+        sequences: ['shift+n', 'n'],
+        scope: ShortcutScope.ALL,
+    },
+};
+
+registerComponentShortcuts(componentShortcuts);
+
+// We use the observer to see if these controls are in the scopeport
 // They automatically put to extra if not
 const ObservedCursorControl = ControlVisibilityObserver<CursorControlProps>(CursorControl);
 const ObservedMoveControl = ControlVisibilityObserver<MoveControlProps>(MoveControl);
@@ -105,14 +139,14 @@ export default function ControlsSideBarComponent(props: Props): JSX.Element {
     let tagControlVisible = withUnspecifiedType;
     const skeletonControlVisible = labels.some((label: Label) => label.type === 'skeleton');
     labels.forEach((label: Label) => {
-        rectangleControlVisible = rectangleControlVisible || label.type === ShapeType.RECTANGLE;
-        polygonControlVisible = polygonControlVisible || label.type === ShapeType.POLYGON;
-        polylineControlVisible = polylineControlVisible || label.type === ShapeType.POLYLINE;
-        pointsControlVisible = pointsControlVisible || label.type === ShapeType.POINTS;
-        ellipseControlVisible = ellipseControlVisible || label.type === ShapeType.ELLIPSE;
-        cuboidControlVisible = cuboidControlVisible || label.type === ShapeType.CUBOID;
-        maskControlVisible = maskControlVisible || label.type === ShapeType.MASK;
-        tagControlVisible = tagControlVisible || label.type === ObjectType.TAG;
+        rectangleControlVisible = rectangleControlVisible || label.type === LabelType.RECTANGLE;
+        polygonControlVisible = polygonControlVisible || label.type === LabelType.POLYGON;
+        polylineControlVisible = polylineControlVisible || label.type === LabelType.POLYLINE;
+        pointsControlVisible = pointsControlVisible || label.type === LabelType.POINTS;
+        ellipseControlVisible = ellipseControlVisible || label.type === LabelType.ELLIPSE;
+        cuboidControlVisible = cuboidControlVisible || label.type === LabelType.CUBOID;
+        maskControlVisible = maskControlVisible || label.type === LabelType.MASK;
+        tagControlVisible = tagControlVisible || label.type === LabelType.TAG;
     });
 
     const preventDefault = (event: KeyboardEvent | undefined): void => {
@@ -121,12 +155,7 @@ export default function ControlsSideBarComponent(props: Props): JSX.Element {
         }
     };
 
-    let subKeyMap: any = {
-        CLOCKWISE_ROTATION: keyMap.CLOCKWISE_ROTATION,
-        ANTICLOCKWISE_ROTATION: keyMap.ANTICLOCKWISE_ROTATION,
-    };
-
-    let handlers: any = {
+    let handlers: Partial<Record<keyof typeof componentShortcuts, (event?: KeyboardEvent) => void>> = {
         CLOCKWISE_ROTATION: (event: KeyboardEvent | undefined) => {
             preventDefault(event);
             rotateFrame(Rotation.CLOCKWISE90);
@@ -164,7 +193,7 @@ export default function ControlsSideBarComponent(props: Props): JSX.Element {
                 if (!drawing) {
                     if (editing) {
                         // users probably will press N as they are used to do when they want to finish editing
-                        // in this case, if a mask is being edited we probably want to finish editing first
+                        // in this case, if a mask or polyline is being edited we probably want to finish editing first
                         canvasInstance.edit({ enabled: false });
                         return;
                     }
@@ -189,26 +218,15 @@ export default function ControlsSideBarComponent(props: Props): JSX.Element {
                 }
             },
         };
-        subKeyMap = {
-            ...subKeyMap,
-            PASTE_SHAPE: keyMap.PASTE_SHAPE,
-            SWITCH_DRAW_MODE: keyMap.SWITCH_DRAW_MODE,
-        };
     }
 
     return (
         <Layout.Sider className='cvat-canvas-controls-sidebar' theme='light' width={44}>
-            <GlobalHotKeys keyMap={subKeyMap} handlers={handlers} />
+            <GlobalHotKeys keyMap={subKeyMap(componentShortcuts, keyMap)} handlers={handlers} />
             <ObservedCursorControl
                 cursorShortkey={normalizedKeyMap.CANCEL}
                 canvasInstance={canvasInstance}
                 activeControl={activeControl}
-                shortcuts={{
-                    CANCEL: {
-                        details: keyMap.CANCEL,
-                        displayValue: normalizedKeyMap.CANCEL,
-                    },
-                }}
             />
             <ObservedMoveControl canvasInstance={canvasInstance} activeControl={activeControl} />
             <ObservedRotateControl

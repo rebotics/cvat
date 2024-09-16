@@ -5,27 +5,21 @@
 import React, { useCallback } from 'react';
 import { useDispatch } from 'react-redux';
 import { useHistory } from 'react-router';
-import Menu from 'antd/lib/menu';
 import Modal from 'antd/lib/modal';
-// eslint-disable-next-line import/no-extraneous-dependencies
-import { MenuInfo } from 'rc-menu/lib/interface';
 import { exportActions } from 'actions/export-actions';
 
-import {
-    Job, JobStage, JobType, getCore,
-} from 'cvat-core-wrapper';
+import { Job, JobType } from 'cvat-core-wrapper';
 import { deleteJobAsync } from 'actions/jobs-actions';
 import { importActions } from 'actions/import-actions';
-
-const core = getCore();
+import Menu, { MenuInfo } from 'components/dropdown-menu';
 
 interface Props {
     job: Job;
-    onJobUpdate: (job: Job) => void;
+    onJobUpdate: (job: Job, fields: Parameters<Job['save']>[0]) => void;
 }
 
 function JobActionsMenu(props: Props): JSX.Element {
-    const { job, onJobUpdate } = props;
+    const { job } = props;
     const history = useHistory();
     const dispatch = useDispatch();
 
@@ -54,21 +48,15 @@ function JobActionsMenu(props: Props): JSX.Element {
                 } else if (action.key === 'project') {
                     history.push(`/projects/${job.projectId}`);
                 } else if (action.key === 'bug_tracker') {
-                    if (job.bugTracker) window.open(job.bugTracker, '_blank', 'noopener noreferrer');
+                    if (job.bugTracker) {
+                        window.open(job.bugTracker, '_blank', 'noopener noreferrer');
+                    }
                 } else if (action.key === 'import_job') {
                     dispatch(importActions.openImportDatasetModal(job));
                 } else if (action.key === 'export_job') {
                     dispatch(exportActions.openExportDatasetModal(job));
                 } else if (action.key === 'view_analytics') {
                     history.push(`/tasks/${job.taskId}/jobs/${job.id}/analytics`);
-                } else if (action.key === 'renew_job') {
-                    job.state = core.enums.JobState.NEW;
-                    job.stage = JobStage.ANNOTATION;
-                    onJobUpdate(job);
-                } else if (action.key === 'finish_job') {
-                    job.stage = JobStage.ACCEPTANCE;
-                    job.state = core.enums.JobState.COMPLETED;
-                    onJobUpdate(job);
                 }
             }}
         >
@@ -78,10 +66,6 @@ function JobActionsMenu(props: Props): JSX.Element {
             <Menu.Item key='import_job'>Import annotations</Menu.Item>
             <Menu.Item key='export_job'>Export annotations</Menu.Item>
             <Menu.Item key='view_analytics'>View analytics</Menu.Item>
-            {[JobStage.ANNOTATION, JobStage.VALIDATION].includes(job.stage) ?
-                <Menu.Item key='finish_job'>Finish the job</Menu.Item> : null}
-            {job.stage === JobStage.ACCEPTANCE ?
-                <Menu.Item key='renew_job'>Renew the job</Menu.Item> : null}
             <Menu.Divider />
             <Menu.Item
                 key='delete'

@@ -325,8 +325,7 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
     const credentialsBlok = (): JSX.Element | null => {
         const internalCommonProps = {
             ...commonProps,
-            labelCol: { span: 8, offset: 2 },
-            wrapperCol: { offset: 2 },
+            className: `${commonProps.className} cvat-cloud-storage-form-item-offset-2`,
         };
 
         if (providerType === ProviderType.REBOTICS_S3_BUCKET) {
@@ -495,9 +494,7 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
 
     const awsS3Configuration = (): JSX.Element => {
         const internalCommonProps = {
-            ...commonProps,
-            labelCol: { offset: 1 },
-            wrapperCol: { offset: 1 },
+            className: `${commonProps.className} cvat-cloud-storage-form-item-offset-1`,
         };
 
         return (
@@ -511,7 +508,7 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
                     <Input disabled={!!cloudStorage} maxLength={63} />
                 </Form.Item>
                 <Form.Item
-                    label='Authorization type'
+                    label='Authentication type'
                     name='credentials_type'
                     rules={[{ required: true, message: 'Please, specify credentials type' }]}
                     {...internalCommonProps}
@@ -543,9 +540,7 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
 
     const azureBlobStorageConfiguration = (): JSX.Element => {
         const internalCommonProps = {
-            ...commonProps,
-            labelCol: { offset: 1 },
-            wrapperCol: { offset: 1 },
+            className: `${commonProps.className} cvat-cloud-storage-form-item-offset-1`,
         };
 
         return (
@@ -559,7 +554,7 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
                     <Input disabled={!!cloudStorage} maxLength={63} />
                 </Form.Item>
                 <Form.Item
-                    label='Authorization type'
+                    label='Authentication type'
                     name='credentials_type'
                     rules={[{ required: true, message: 'Please, specify credentials type' }]}
                     {...internalCommonProps}
@@ -580,9 +575,7 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
 
     const googleCloudStorageConfiguration = (): JSX.Element => {
         const internalCommonProps = {
-            ...commonProps,
-            labelCol: { span: 6, offset: 1 },
-            wrapperCol: { offset: 1 },
+            className: `${commonProps.className} cvat-cloud-storage-form-item-offset-1`,
         };
 
         return (
@@ -597,7 +590,7 @@ export default function CreateCloudStorageForm(props: Props): JSX.Element {
                     <Input disabled={!!cloudStorage} maxLength={222} />
                 </Form.Item>
                 <Form.Item
-                    label='Authorization type'
+                    label='Authentication type'
                     name='credentials_type'
                     rules={[{ required: true, message: 'Please, specify credentials type' }]}
                     {...internalCommonProps}

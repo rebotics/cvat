@@ -22,7 +22,7 @@ for service in $BUILD; do
       DOCKER_BUILDKIT=1 docker build -f rebotics/Dockerfile -t retechlabs/rebotics-cvat:${VERSION} .
       ;;
     "opa")
-      OPA_VERSION=0.45.0-rootless
+      OPA_VERSION=0.63.0
       docker build -f rebotics/Dockerfile.opa --build-arg OPA_VERSION=${OPA_VERSION} -t retechlabs/rebotics-cvat-opa:${VERSION} .
       ;;
     "analytics")

@@ -1,33 +1,33 @@
-// Copyright (C) 2023 CVAT.ai Corporation
+// Copyright (C) 2023-2024 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
-@import '../../base';
+@import 'base';
 
 .cvat-analytics-inner {
     background: $background-color-1;
     min-height: $grid-unit-size * 95;
     padding: $grid-unit-size * 4;
     padding-bottom: $grid-unit-size;
+    border-radius: $border-radius-base;
 
     .ant-tabs {
         height: 100%;
     }
 }
 
-.cvat-task-quality-page {
+.cvat-task-quality-page,
+.cvat-analytics-overview,
+.cvat-project-quality-page {
     >.ant-row {
         margin-top: $grid-unit-size;
     }
 }
 
-.cvat-task-quality-page-empty {
-    @extend .cvat-task-quality-page;
-
+.cvat-empty-performance-analytics-item {
     display: flex;
-    justify-content: center;
     align-items: center;
-    height: $grid-unit-size * 68;
+    justify-content: space-between;
 }
 
 .cvat-task-mean-annotation-quality {
@@ -41,6 +41,10 @@
     .ant-card-body {
         padding: $grid-unit-size * 2 $grid-unit-size * 3;
     }
+}
+
+.cvat-analytics-refresh-button {
+    margin-right: $grid-unit-size;
 }
 
 .cvat-analytics-card-title {
@@ -82,7 +86,6 @@
 
     a {
         color: white;
-        margin-left: $grid-unit-size;
 
         &:hover {
             color: white;
@@ -92,9 +95,6 @@
 
 .cvat-analytics-time-hint {
     font-size: 10px;
-    position: absolute;
-    bottom: -$grid-unit-size * 3;
-    right: $grid-unit-size * 4;
 }
 
 .cvat-analytics-page {
@@ -108,33 +108,6 @@
     padding-bottom: $grid-unit-size * 2;
 }
 
-.cvat-project-analytics-title {
-    margin-bottom: $grid-unit-size;
-
-    h4 {
-        display: inline;
-        margin-right: $grid-unit-size;
-    }
-}
-
-.cvat-task-analytics-title {
-    margin-bottom: $grid-unit-size;
-
-    h4 {
-        display: inline;
-        margin-right: $grid-unit-size;
-    }
-}
-
-.cvat-job-analytics-title {
-    margin-bottom: $grid-unit-size;
-
-    h4 {
-        display: inline;
-        margin-right: $grid-unit-size;
-    }
-}
-
 .cvat-task-quality-reports-hint {
     margin-bottom: $grid-unit-size * 3;
 }
@@ -144,10 +117,6 @@
         padding: $grid-unit-size * 3;
     }
 
-    h5 {
-        margin: 0;
-    }
-
     .ant-btn {
         padding-left: $grid-unit-size * 3;
         padding-right: $grid-unit-size * 3;
@@ -155,7 +124,10 @@
 }
 
 .cvat-quality-settings-switch {
-    padding-left: $grid-unit-size * 2;
+    padding: $grid-unit-size $grid-unit-size * 1.25;
+    border: 1px solid lightgray;
+    margin-left: $grid-unit-size;
+    border-radius: $border-radius-base;
 }
 
 .cvat-quality-settings-title {

@@ -1,25 +1,40 @@
-// Copyright (C) 2023 CVAT.ai Corporation
+// Copyright (C) 2023-2024 CVAT.ai Corporation
 //
 // SPDX-License-Identifier: MIT
 
+import './styles.scss';
+
 import React, { useCallback, useEffect, useState } from 'react';
+import { useDispatch } from 'react-redux';
 import { useLocation, useParams } from 'react-router';
 import { Link } from 'react-router-dom';
 import { Row, Col } from 'antd/lib/grid';
 import Tabs from 'antd/lib/tabs';
-import Text from 'antd/lib/typography/Text';
 import Title from 'antd/lib/typography/Title';
 import notification from 'antd/lib/notification';
+import moment from 'moment';
 import { useIsMounted } from 'utils/hooks';
 import { Project, Task } from 'reducers';
-import { AnalyticsReport, Job, getCore } from 'cvat-core-wrapper';
-import moment from 'moment';
+import {
+    AnalyticsReport, Job, RQStatus, getCore,
+} from 'cvat-core-wrapper';
+import { updateJobAsync } from 'actions/jobs-actions';
 import CVATLoadingSpinner from 'components/common/loading-spinner';
 import GoBackButton from 'components/common/go-back-button';
 import AnalyticsOverview, { DateIntervals } from './analytics-performance';
-import TaskQualityComponent from './quality/task-quality-component';
+import TaskQualityComponent from './task-quality/task-quality-component';
 
 const core = getCore();
+
+enum AnalyticsTabs {
+    OVERVIEW = 'overview',
+    QUALITY = 'quality',
+}
+
+function getTabFromHash(): AnalyticsTabs {
+    const tab = window.location.hash.slice(1) as AnalyticsTabs;
+    return Object.values(AnalyticsTabs).includes(tab) ? tab : AnalyticsTabs.OVERVIEW;
+}
 
 function handleTimePeriod(interval: DateIntervals): [string, string] {
     const now = moment.utc();
@@ -42,321 +57,256 @@ function handleTimePeriod(interval: DateIntervals): [string, string] {
     }
 }
 
-function AnalyticsPage(): JSX.Element {
-    const location = useLocation();
-    let instanceType = '';
+function readInstanceType(location: ReturnType<typeof useLocation>): InstanceType {
     if (location.pathname.includes('projects')) {
-        instanceType = 'project';
-    } else if (location.pathname.includes('jobs')) {
-        instanceType = 'job';
-    } else {
-        instanceType = 'task';
+        return 'project';
     }
+    if (location.pathname.includes('jobs')) {
+        return 'job';
+    }
+    return 'task';
+}
 
-    const [fetching, setFetching] = useState(true);
+function readInstanceId(type: InstanceType): number {
+    if (type === 'project') {
+        return +useParams<{ pid: string }>().pid;
+    }
+    if (type === 'job') {
+        return +useParams<{ jid: string }>().jid;
+    }
+    return +useParams<{ tid: string }>().tid;
+}
+
+type InstanceType = 'project' | 'task' | 'job';
+
+function AnalyticsPage(): JSX.Element {
+    const dispatch = useDispatch();
+    const location = useLocation();
+
+    const requestedInstanceType: InstanceType = readInstanceType(location);
+    const requestedInstanceID = readInstanceId(requestedInstanceType);
+
+    const [activeTab, setTab] = useState(getTabFromHash());
+    const [instanceType, setInstanceType] = useState<InstanceType | null>(null);
     const [instance, setInstance] = useState<Project | Task | Job | null>(null);
-    const [analyticsReportInstance, setAnalyticsReportInstance] = useState<AnalyticsReport | null>(null);
+    const [analyticsReport, setAnalyticsReport] = useState<AnalyticsReport | null>(null);
+    const [timePeriod, setTimePeriod] = useState<DateIntervals>(DateIntervals.LAST_WEEK);
+    const [reportRefreshingStatus, setReportRefreshingStatus] = useState<string | null>(null);
+    const [fetching, setFetching] = useState(true);
     const isMounted = useIsMounted();
 
-    let instanceID: number | null = null;
-    let reportRequestID: number | null = null;
-    switch (instanceType) {
-        case 'project': {
-            instanceID = +useParams<{ pid: string }>().pid;
-            reportRequestID = +useParams<{ pid: string }>().pid;
-            break;
-        }
-        case 'task': {
-            instanceID = +useParams<{ tid: string }>().tid;
-            reportRequestID = +useParams<{ tid: string }>().tid;
-            break;
-        }
-        case 'job': {
-            instanceID = +useParams<{ jid: string }>().jid;
-            reportRequestID = +useParams<{ jid: string }>().jid;
-            break;
-        }
-        default: {
-            throw new Error(`Unsupported instance type ${instanceType}`);
-        }
-    }
+    const receiveInstance = async (type: InstanceType, id: number): Promise<void> => {
+        let receivedInstance: Task | Project | Job | null = null;
 
-    const receieveInstance = (): void => {
-        let instanceRequest = null;
-        switch (instanceType) {
-            case 'project': {
-                instanceRequest = core.projects.get({ id: instanceID });
-                break;
-            }
-            case 'task': {
-                instanceRequest = core.tasks.get({ id: instanceID });
-                break;
-            }
-            case 'job':
-            {
-                instanceRequest = core.jobs.get({ jobID: instanceID });
-                break;
-            }
-            default: {
-                throw new Error(`Unsupported instance type ${instanceType}`);
-            }
-        }
-
-        if (Number.isInteger(instanceID)) {
-            instanceRequest
-                .then(([_instance]: Task[] | Project[] | Job[]) => {
-                    if (isMounted() && _instance) {
-                        setInstance(_instance);
-                    }
-                }).catch((error: Error) => {
-                    if (isMounted()) {
-                        notification.error({
-                            message: 'Could not receive the requested instance from the server',
-                            description: error.toString(),
-                        });
-                    }
-                }).finally(() => {
-                    if (isMounted()) {
-                        setFetching(false);
-                    }
-                });
-        } else {
-            notification.error({
-                message: 'Could not receive the requested task from the server',
-                description: `Requested "${instanceID}" is not valid`,
-            });
-            setFetching(false);
-        }
-    };
-
-    const receieveReport = (timeInterval: DateIntervals): void => {
-        if (Number.isInteger(instanceID) && Number.isInteger(reportRequestID)) {
-            let reportRequest = null;
-            const [endDate, startDate] = handleTimePeriod(timeInterval);
-
-            switch (instanceType) {
+        try {
+            switch (type) {
                 case 'project': {
-                    reportRequest = core.analytics.performance.reports({
-                        projectID: reportRequestID,
-                        endDate,
-                        startDate,
-                    });
+                    [receivedInstance] = await core.projects.get({ id });
                     break;
                 }
                 case 'task': {
-                    reportRequest = core.analytics.performance.reports({
-                        taskID: reportRequestID,
-                        endDate,
-                        startDate,
-                    });
+                    [receivedInstance] = await core.tasks.get({ id });
                     break;
                 }
                 case 'job': {
-                    reportRequest = core.analytics.performance.reports({
-                        jobID: reportRequestID,
-                        endDate,
-                        startDate,
-                    });
+                    [receivedInstance] = await core.jobs.get({ jobID: id });
                     break;
                 }
-                default: {
-                    throw new Error(`Unsupported instance type ${instanceType}`);
-                }
+                default:
+                    return;
             }
 
-            reportRequest
-                .then((report: AnalyticsReport) => {
-                    if (isMounted() && report) {
-                        setAnalyticsReportInstance(report);
-                    }
-                }).catch((error: Error) => {
-                    if (isMounted()) {
-                        notification.error({
-                            message: 'Could not receive the requested report from the server',
-                            description: error.toString(),
-                        });
-                    }
-                });
+            if (isMounted()) {
+                setInstance(receivedInstance);
+                setInstanceType(type);
+            }
+        } catch (error: unknown) {
+            notification.error({
+                message: `Could not receive requested ${type}`,
+                description: `${error instanceof Error ? error.message : ''}`,
+            });
         }
     };
 
-    useEffect((): void => {
-        Promise.all([receieveInstance(), receieveReport(DateIntervals.LAST_WEEK)]).finally(() => {
-            if (isMounted()) {
-                setFetching(false);
+    const receiveReport = async (timeInterval: DateIntervals, type: InstanceType, id: number): Promise<void> => {
+        const [endDate, startDate] = handleTimePeriod(timeInterval);
+        let report: AnalyticsReport | null = null;
+
+        try {
+            const body = { endDate, startDate };
+            switch (type) {
+                case 'project': {
+                    report = await core.analytics.performance.reports({ ...body, projectID: id });
+                    break;
+                }
+                case 'task': {
+                    report = await core.analytics.performance.reports({ ...body, taskID: id });
+                    break;
+                }
+                case 'job': {
+                    report = await core.analytics.performance.reports({ ...body, jobID: id });
+                    break;
+                }
+                default:
+                    return;
             }
+
+            if (isMounted()) {
+                setAnalyticsReport(report);
+            }
+        } catch (error: unknown) {
+            notification.error({
+                message: 'Could not receive requested report',
+                description: `${error instanceof Error ? error.message : ''}`,
+            });
+        }
+    };
+
+    useEffect(() => {
+        if (Number.isInteger(requestedInstanceID) && ['project', 'task', 'job'].includes(requestedInstanceType)) {
+            setFetching(true);
+            Promise.all([
+                receiveInstance(requestedInstanceType, requestedInstanceID),
+                receiveReport(timePeriod, requestedInstanceType, requestedInstanceID),
+            ]).finally(() => {
+                if (isMounted()) {
+                    setFetching(false);
+                }
+            });
+        } else {
+            notification.error({
+                message: 'Could not load this page',
+                description: `Not valid resource ${requestedInstanceType} #${requestedInstanceID}`,
+            });
+        }
+
+        return () => {
+            if (isMounted()) {
+                setInstance(null);
+                setAnalyticsReport(null);
+            }
+        };
+    }, [requestedInstanceType, requestedInstanceID, timePeriod]);
+
+    useEffect(() => {
+        window.addEventListener('hashchange', () => {
+            const hash = getTabFromHash();
+            setTab(hash);
         });
     }, []);
 
-    const onJobUpdate = useCallback((job: Job): void => {
-        setFetching(true);
-        job.save().then(() => {
-            if (isMounted()) {
-                receieveInstance();
-            }
-        }).catch((error: Error) => {
+    useEffect(() => {
+        window.location.hash = activeTab;
+    }, [activeTab]);
+
+    const onCreateReport = useCallback(() => {
+        const onUpdate = (status: RQStatus, progress: number, message: string): void => {
+            setReportRefreshingStatus(message);
+        };
+
+        const body = {
+            ...(requestedInstanceType === 'project' ? { projectID: requestedInstanceID } : {}),
+            ...(requestedInstanceType === 'task' ? { taskID: requestedInstanceID } : {}),
+            ...(requestedInstanceType === 'job' ? { jobID: requestedInstanceID } : {}),
+        };
+
+        core.analytics.performance.calculate(body, onUpdate).then(() => {
+            receiveReport(timePeriod, requestedInstanceType, requestedInstanceID);
+        }).finally(() => {
+            setReportRefreshingStatus(null);
+        }).catch((error: unknown) => {
             if (isMounted()) {
                 notification.error({
-                    message: 'Could not update the job',
-                    description: error.toString(),
+                    message: 'Error occurred during requesting performance report',
+                    description: error instanceof Error ? error.message : '',
                 });
             }
-        }).finally(() => {
+        });
+    }, [requestedInstanceType, requestedInstanceID, timePeriod]);
+
+    const onJobUpdate = useCallback((job: Job, data: Parameters<Job['save']>[0]): void => {
+        setFetching(true);
+        dispatch(updateJobAsync(job, data)).finally(() => {
             if (isMounted()) {
                 setFetching(false);
             }
         });
     }, []);
 
-    const onAnalyticsTimePeriodChange = useCallback((val: DateIntervals): void => {
-        receieveReport(val);
+    const onTabKeyChange = useCallback((key: string): void => {
+        setTab(key as AnalyticsTabs);
     }, []);
 
     let backNavigation: JSX.Element | null = null;
     let title: JSX.Element | null = null;
     let tabs: JSX.Element | null = null;
-    if (instance) {
-        switch (instanceType) {
-            case 'project': {
-                backNavigation = (
-                    <Col span={22} xl={18} xxl={14} className='cvat-task-top-bar'>
-                        <GoBackButton />
-                    </Col>
-                );
-                title = (
-                    <Col className='cvat-project-analytics-title'>
-                        <Title level={4} className='cvat-text-color'>
-                            Analytics for
-                            {' '}
-                            <Link to={`/projects/${instance.id}`}>{`Project #${instance.id}`}</Link>
-                        </Title>
-                    </Col>
-                );
-                tabs = (
-                    <Tabs type='card' className='cvat-project-analytics-tabs'>
-                        <Tabs.TabPane
-                            tab={(
-                                <span>
-                                    <Text>Performance</Text>
-                                </span>
-                            )}
-                            key='Overview'
-                        >
-                            <AnalyticsOverview
-                                report={analyticsReportInstance}
-                                onTimePeriodChange={onAnalyticsTimePeriodChange}
-                            />
-                        </Tabs.TabPane>
-                    </Tabs>
-                );
-                break;
-            }
-            case 'task': {
-                backNavigation = (
-                    <Col span={22} xl={18} xxl={14} className='cvat-task-top-bar'>
-                        <GoBackButton />
-                    </Col>
-                );
-                title = (
-                    <Col className='cvat-task-analytics-title'>
-                        <Title level={4} className='cvat-text-color'>
-                            Analytics for
-                            {' '}
-                            <Link to={`/tasks/${instance.id}`}>{`Task #${instance.id}`}</Link>
-                        </Title>
-                    </Col>
-                );
-                tabs = (
-                    <Tabs type='card' className='cvat-task-analytics-tabs'>
-                        <Tabs.TabPane
-                            tab={(
-                                <span>
-                                    <Text>Performance</Text>
-                                </span>
-                            )}
-                            key='overview'
-                        >
-                            <AnalyticsOverview
-                                report={analyticsReportInstance}
-                                onTimePeriodChange={onAnalyticsTimePeriodChange}
-                            />
-                        </Tabs.TabPane>
-                        <Tabs.TabPane
-                            tab={(
-                                <span>
-                                    <Text>Quality</Text>
-                                </span>
-                            )}
-                            key='quality'
-                        >
-                            <TaskQualityComponent task={instance} onJobUpdate={onJobUpdate} />
-                        </Tabs.TabPane>
-                    </Tabs>
-                );
-                break;
-            }
-            case 'job':
-            {
-                backNavigation = (
-                    <Col span={22} xl={18} xxl={14} className='cvat-task-top-bar'>
-                        <GoBackButton />
-                    </Col>
-                );
-                title = (
-                    <Col className='cvat-job-analytics-title'>
-                        <Title level={4} className='cvat-text-color'>
-                            Analytics for
-                            {' '}
-                            <Link to={`/tasks/${instance.taskId}/jobs/${instance.id}`}>{`Job #${instance.id}`}</Link>
-                        </Title>
-                    </Col>
-                );
-                tabs = (
-                    <Tabs type='card'>
-                        <Tabs.TabPane
-                            tab={(
-                                <span>
-                                    <Text>Performance</Text>
-                                </span>
-                            )}
-                            key='overview'
-                        >
-                            <AnalyticsOverview
-                                report={analyticsReportInstance}
-                                onTimePeriodChange={onAnalyticsTimePeriodChange}
-                            />
-                        </Tabs.TabPane>
-                    </Tabs>
-                );
-                break;
-            }
-            default: {
-                throw new Error(`Unsupported instance type ${instanceType}`);
-            }
+    if (instanceType && instance) {
+        backNavigation = (
+            <Col span={22} xl={18} xxl={14} className='cvat-task-top-bar'>
+                <GoBackButton />
+            </Col>
+        );
+
+        let analyticsFor: JSX.Element | null = <Link to={`/projects/${instance.id}`}>{`Project #${instance.id}`}</Link>;
+        if (instanceType === 'task') {
+            analyticsFor = <Link to={`/tasks/${instance.id}`}>{`Task #${instance.id}`}</Link>;
+        } else if (instanceType === 'job') {
+            analyticsFor = <Link to={`/tasks/${instance.taskId}/jobs/${instance.id}`}>{`Job #${instance.id}`}</Link>;
         }
+        title = (
+            <Col>
+                <Title level={4} className='cvat-text-color'>
+                    Analytics for
+                    {' '}
+                    {analyticsFor}
+                </Title>
+            </Col>
+        );
+
+        tabs = (
+            <Tabs
+                type='card'
+                activeKey={activeTab}
+                defaultActiveKey={AnalyticsTabs.OVERVIEW}
+                onChange={onTabKeyChange}
+                className='cvat-task-analytics-tabs'
+                items={[{
+                    key: AnalyticsTabs.OVERVIEW,
+                    label: 'Performance',
+                    children: (
+                        <AnalyticsOverview
+                            report={analyticsReport}
+                            timePeriod={timePeriod}
+                            reportRefreshingStatus={reportRefreshingStatus}
+                            onTimePeriodChange={setTimePeriod}
+                            onCreateReport={onCreateReport}
+                        />
+                    ),
+                },
+                ...(instanceType === 'task' ? [{
+                    key: AnalyticsTabs.QUALITY,
+                    label: 'Quality',
+                    children: <TaskQualityComponent task={instance} onJobUpdate={onJobUpdate} />,
+                }] : [])]}
+            />
+        );
     }
 
     return (
         <div className='cvat-analytics-page'>
-            {
-                fetching ? (
-                    <div className='cvat-analytics-loading'>
-                        <CVATLoadingSpinner />
-                    </div>
-                ) : (
-                    <Row
-                        justify='center'
-                        align='top'
-                        className='cvat-analytics-wrapper'
-                    >
-                        {backNavigation}
-                        <Col span={22} xl={18} xxl={14} className='cvat-analytics-inner'>
-                            {title}
-                            {tabs}
-                        </Col>
-                    </Row>
-                )
-            }
+            {fetching ? (
+                <div className='cvat-analytics-loading'>
+                    <CVATLoadingSpinner />
+                </div>
+            ) : (
+                <Row justify='center' align='top' className='cvat-analytics-wrapper'>
+                    {backNavigation}
+                    <Col span={22} xl={18} xxl={14} className='cvat-analytics-inner'>
+                        {title}
+                        {tabs}
+                    </Col>
+                </Row>
+            )}
         </div>
     );
 }
