@@ -2819,7 +2819,7 @@ class CloudStorageViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
             # The idea is try to define real manifest preview only for the storages that have related manifests
             # because otherwise it can lead to extra calls to a bucket, that are usually not free.
             if not db_storage.has_at_least_one_manifest:
-                # TODO if settings.USE_S3_CACHE -> s3_client preview
+                # TODO: if settings.USE_S3_CACHE -> s3_client preview
                 result = cache.get_cloud_preview_with_mime(db_storage)
                 if not result:
                     return HttpResponseNotFound('Cloud storage preview not found')

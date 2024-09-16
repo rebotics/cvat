@@ -49,10 +49,8 @@ services:
       - "8006:8080"
     networks:
       - reb_cvat
-      - reboticsadmin_default
-      - rebotics-management-django_default
-
-  # cvat_utils container - for what?
+      - admin
+      - mgmt
 
   cvat_opa:
     container_name: reb_cvat_opa
@@ -89,7 +87,5 @@ volumes:
 
 networks:
   reb_cvat:
-  reboticsadmin_default:
-    external: true
-  rebotics-management-django_default:
-    external: true
+  admin:
+  mgmt:

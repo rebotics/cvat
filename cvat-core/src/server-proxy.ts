@@ -2324,8 +2324,6 @@ async function calculateAnalyticsReport(
 /* Rebotics overrides */
 /* ****************** */
 
-// TODO: check overrides, if they still work.
-
 const s3Axios = Axios.create();
 delete s3Axios.defaults.headers.common.Authorization;
 s3Axios.defaults.withCredentials = false;
