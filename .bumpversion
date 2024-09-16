@@ -1,7 +1,7 @@
 [bumpversion]
-current_version = 2.11.0.3
-parse = 2.11.0.(?P<patch>\d+)
-serialize = 2.11.0.{patch}
+current_version = 2.17.0.0
+parse = 2.17.0.(?P<patch>\d+)
+serialize = 2.17.0.{patch}
 commit = True
 tag = True
 message = Bump version: {current_version} -> {new_version}
