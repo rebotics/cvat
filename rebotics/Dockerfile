@@ -244,7 +244,7 @@ RUN sed -i -E "s#(<\!doctype html>)#{% load static %}\1#g" ${HOME}/static-ui/ind
 
 # Override supervisor / nginx configs and some scripts
 COPY --chown=${USER} rebotics/supervisord.conf ${HOME}/supervisord/all.conf
-COPY --chown=${USER} rebotics/backend_entrypoint.sh rebotics/wait_for_deps.sh ${HOME}/
+COPY --chown=${USER} rebotics/backend_entrypoint.sh ${HOME}/
 COPY rebotics/nginx.conf /etc/nginx/nginx.conf
 
 # Add version file

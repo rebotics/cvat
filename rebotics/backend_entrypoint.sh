@@ -9,6 +9,7 @@ fail() {
 
 wait_for_db() {
     ~/wait-for-it.sh "${DB_URL}" -t 0
+    ~/wait-for-it.sh "${REDIS_URL}" -t 0
 }
 
 cmd_bash() {
@@ -28,8 +29,6 @@ cmd_run() {
     if [ "$1" = "all" ]; then
         ~/manage.py collectstatic --no-input
     fi
-
-    wait_for_db
 
     echo "waiting for migrations to complete..."
     while ! ~/manage.py migrate --check; do
